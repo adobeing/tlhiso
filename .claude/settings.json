@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"REMINDER: Before applying this edit, confirm you have read TLHISO_APP_RECORD.md and are only changing what was explicitly requested.\"}}'",
+            "statusMessage": "Checking Tlhiso app record…"
+          }
+        ]
+      }
+    ]
+  }
+}

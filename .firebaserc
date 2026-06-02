@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "tlhiso",
+    "staging": "tlhiso-staging"
+  },
+  "targets": {
+    "tlhiso": {
+      "hosting": {
+        "production": ["tlhiso"]
+      }
+    },
+    "tlhiso-staging": {
+      "hosting": {
+        "staging": ["tlhiso-staging"]
+      }
+    }
+  }
+}
