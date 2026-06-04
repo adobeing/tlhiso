@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Link } from 'react-router-dom'
 import DashboardLayout from '../../shared/DashboardLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useCollection } from '../../../hooks/useCollection'
@@ -11,11 +11,12 @@ import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage } from '../../../services/firebase'
+import { db, storage, functions } from '../../../services/firebase'
+import { httpsCallable } from 'firebase/functions'
 import {
   PlusCircle, Trash2, MapPin, Eye, Pencil, List, Zap, Landmark,
   Percent as PercentIcon, TrendingUp, Download, X, Loader2, Wrench,
-  AlertTriangle, CheckCircle2, Clock,
+  AlertTriangle, CheckCircle2, Clock, Bell, Users as UsersIcon, FileText, Upload,
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer'
@@ -177,7 +178,7 @@ function Overview() {
       </div>
 
       <SectionCard icon={MapPin} title="Properties Overview"
-        action={<a href="/property/properties" className="text-xs font-semibold text-primary hover:underline">View all →</a>}>
+        action={<Link to="/property/properties" className="text-xs font-semibold text-primary hover:underline">View all →</Link>}>
         {properties.length === 0
           ? <EmptyState icon={MapPin} message="No properties added yet." />
           : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1035,8 +1036,274 @@ function Maintenance() {
   )
 }
 
-function SimplePage({ title }) {
-  return <div><h2 className="text-base font-bold text-ink mb-3">{title}</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>
+// ── Owners ────────────────────────────────────────────────────────────────────
+function Owners() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const owners = useCollection(uid ? `users/${uid}/owners` : null)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '', phone: '', idNumber: '', bankName: '', accountNumber: '', accountType: '', branchCode: '' })
+  async function save() {
+    if (!uid || !form.name) { alert('Owner name is required.'); return }
+    await addDoc(collection(db, 'users', uid, 'owners'), { ...form, createdAt: serverTimestamp() })
+    setOpen(false); setForm({ name: '', email: '', phone: '', idNumber: '', bankName: '', accountNumber: '', accountType: '', branchCode: '' })
+  }
+  const cols = [
+    { key: 'name', label: 'Owner Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'idNumber', label: 'ID Number' },
+    { key: 'bankName', label: 'Bank' },
+    { key: 'accountNumber', label: 'Account No.' },
+    { key: 'actions', label: '', sortable: false, render: r => (
+      <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this owner? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'owners', r.id)) }}
+        className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+    )},
+  ]
+  return (
+    <div className="space-y-4">
+      <PageHead title="Owners" subtitle="Property owner contact & banking details"
+        action={<AddButton onClick={() => setOpen(true)}>Add Owner</AddButton>} />
+      <DataTable columns={cols} data={owners} emptyMessage="No owners added yet." />
+      <Modal open={open} onClose={() => setOpen(false)} title="New Owner" size="lg">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2"><Field label="Full Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <Field label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+          <Field label="Phone (+27…)" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+          <div className="col-span-2"><Field label="SA ID Number" value={form.idNumber} onChange={e => setForm(f => ({ ...f, idNumber: e.target.value }))} /></div>
+          <div className="col-span-2"><p className="text-xs font-semibold text-ink-secondary mt-2 mb-1">Banking Details</p></div>
+          <Field label="Bank Name" value={form.bankName} onChange={e => setForm(f => ({ ...f, bankName: e.target.value }))} />
+          <Field label="Account Number" value={form.accountNumber} onChange={e => setForm(f => ({ ...f, accountNumber: e.target.value }))} />
+          <Field label="Account Type" select value={form.accountType} onChange={e => setForm(f => ({ ...f, accountType: e.target.value }))}>
+            <option value="">Select…</option>
+            {['Cheque / Current', 'Savings', 'Transmission'].map(t => <option key={t}>{t}</option>)}
+          </Field>
+          <Field label="Branch Code" value={form.branchCode} onChange={e => setForm(f => ({ ...f, branchCode: e.target.value }))} />
+        </div>
+        <button onClick={save} className="mt-4 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Owner</button>
+      </Modal>
+    </div>
+  )
+}
+
+// ── Appointments (Property) ───────────────────────────────────────────────────
+const PROP_APPT_STATUS = ['Scheduled', 'Confirmed', 'Completed', 'Cancelled', 'No-show']
+
+function PropertyAppointments() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
+  const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', status: 'Scheduled', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [sendingId, setSendingId] = useState(null)
+
+  async function save() {
+    if (!uid || !form.date || !form.time) { alert('Date and time are required.'); return }
+    setSaving(true)
+    try {
+      const tenant = tenants.find(t => t.id === form.tenantId)
+      await addDoc(collection(db, 'users', uid, 'appointments'), {
+        ...form,
+        customer: tenant ? `${tenant.firstName} ${tenant.lastName}` : '',
+        customerPhone: tenant?.phone ?? '',
+        createdAt: serverTimestamp(),
+      })
+      setForm({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', status: 'Scheduled', notes: '' })
+      setOpen(false)
+    } finally { setSaving(false) }
+  }
+
+  async function sendReminder(appt) {
+    if (!appt.customerPhone) { alert('No phone number on file for this tenant.'); return }
+    setSendingId(appt.id)
+    try {
+      const fn = httpsCallable(functions, 'sendSMS')
+      const msg = `Reminder: ${appt.customer}, you have a property appointment on ${appt.date} at ${appt.time}. Reply to reschedule.`
+      await fn({ to: appt.customerPhone, message: msg })
+      await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
+      await addDoc(collection(db, 'users', uid, 'messages'), { to: appt.customerPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp() })
+    } catch { alert('Reminder failed — check BulkSMS credentials.') } finally { setSendingId(null) }
+  }
+
+  const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-surface-2 text-ink-secondary')
+
+  const cols = [
+    { key: 'date', label: 'Date' },
+    { key: 'time', label: 'Time' },
+    { key: 'customer', label: 'Tenant' },
+    { key: 'purpose', label: 'Purpose' },
+    { key: 'status', label: 'Status', render: r => (
+      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
+        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
+        {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+      </select>
+    )},
+    { key: 'actions', label: '', sortable: false, render: r => (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} title="Send SMS reminder" className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+          {sendingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
+        </button>
+        <button onClick={() => { if (!window.confirm('Delete this appointment? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'appointments', r.id)) }}
+          className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
+    )},
+  ]
+
+  return (
+    <div className="space-y-4">
+      <PageHead title="Appointments" subtitle="Schedule inspections, viewings & meetings"
+        action={<AddButton onClick={() => setOpen(true)}>Book Appointment</AddButton>} />
+      <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
+      <Modal open={open} onClose={() => setOpen(false)} title="Book Appointment">
+        <div className="space-y-4">
+          <Field label="Tenant (optional)" select value={form.tenantId} onChange={e => setForm(f => ({ ...f, tenantId: e.target.value }))}>
+            <option value="">Select tenant…</option>
+            {tenants.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName} — {t.property}</option>)}
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date *" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            <Field label="Time *" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
+          </div>
+          <Field label="Purpose" value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="e.g. Inspection, Viewing, Signing" />
+          <Field label="Status" select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+            {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+          </Field>
+          <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <button onClick={save} disabled={saving} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving ? 'Saving…' : 'Save Appointment'}</button>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+function Messages() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const messages = useCollection(uid ? `users/${uid}/messages` : null)
+  const sorted = useMemo(() => [...messages].sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0)), [messages])
+  const counts = useMemo(() => { const c = { sms: 0, email: 0, whatsapp: 0 }; messages.forEach(m => { if (m.type in c) c[m.type]++ }); return c }, [messages])
+  const channelBadge = t => ({ sms: 'bg-blue-100 text-blue-600', email: 'bg-emerald-100 text-emerald-700', whatsapp: 'bg-green-100 text-green-600' }[t] ?? 'bg-gray-100 text-gray-500')
+  const cols = [
+    { key: 'type', label: 'Channel', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${channelBadge(r.type)}`}>{r.type}</span> },
+    { key: 'to', label: 'Recipient' },
+    { key: 'body', label: 'Message', render: r => <span className="line-clamp-2 max-w-xs text-sm text-ink-secondary">{r.body}</span> },
+    { key: 'module', label: 'Source', render: r => <span className="capitalize text-xs text-ink-secondary">{(r.module || '—').replace(/-/g, ' ')}</span> },
+    { key: 'sentAt', label: 'Sent', render: r => <span className="text-xs text-ink-secondary">{r.sentAt?.toDate?.()?.toLocaleDateString('en-ZA') ?? '—'}</span> },
+  ]
+  return (
+    <div className="space-y-4">
+      <PageHead title="Messages" subtitle="Log of all messages sent from your account" />
+      <div className="grid grid-cols-3 gap-4">
+        {[{ label: 'SMS Sent', val: counts.sms, color: 'text-blue-600' }, { label: 'Emails Sent', val: counts.email, color: 'text-emerald-600' }, { label: 'WhatsApp Sent', val: counts.whatsapp, color: 'text-green-600' }].map(s => (
+          <div key={s.label} className="rounded-card border border-border bg-white p-4 shadow-card text-center">
+            <p className={`text-2xl font-extrabold ${s.color}`}>{s.val}</p>
+            <p className="mt-1 text-xs font-semibold text-ink-secondary">{s.label}</p>
+          </div>
+        ))}
+      </div>
+      <DataTable columns={cols} data={sorted} emptyMessage="No messages sent yet." />
+    </div>
+  )
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+function Documents() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const docs = useCollection(uid ? `users/${uid}/documents` : null)
+  const properties = useCollection(uid ? `users/${uid}/properties` : null)
+  const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
+  const [open, setOpen] = useState(false)
+  const [file, setFile] = useState(null)
+  const [form, setForm] = useState({ name: '', category: 'Lease Agreement', propertyId: '', tenantId: '', notes: '' })
+  const [uploading, setUploading] = useState(false)
+
+  async function save() {
+    if (!uid || !form.name || !file) { alert('Document name and file are required.'); return }
+    setUploading(true)
+    try {
+      const storageRef = ref(storage, `users/${uid}/documents/${Date.now()}_${file.name}`)
+      await uploadBytes(storageRef, file)
+      const url = await getDownloadURL(storageRef)
+      const property = properties.find(p => p.id === form.propertyId)
+      const tenant = tenants.find(t => t.id === form.tenantId)
+      await addDoc(collection(db, 'users', uid, 'documents'), {
+        ...form,
+        fileUrl: url,
+        fileName: file.name,
+        property: property?.name ?? '',
+        tenant: tenant ? `${tenant.firstName} ${tenant.lastName}` : '',
+        createdAt: serverTimestamp(),
+      })
+      setOpen(false); setFile(null)
+      setForm({ name: '', category: 'Lease Agreement', propertyId: '', tenantId: '', notes: '' })
+    } finally { setUploading(false) }
+  }
+
+  const cols = [
+    { key: 'name', label: 'Document Name' },
+    { key: 'category', label: 'Category' },
+    { key: 'property', label: 'Property' },
+    { key: 'tenant', label: 'Tenant' },
+    { key: 'actions', label: '', sortable: false, render: r => (
+      <div className="flex items-center gap-2">
+        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light">View</a>}
+        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this document? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'documents', r.id)) }}
+          className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
+    )},
+  ]
+
+  return (
+    <div className="space-y-4">
+      <PageHead title="Documents" subtitle="Leases, inspection reports & property documents"
+        action={<AddButton onClick={() => setOpen(true)}>Upload Document</AddButton>} />
+      <DataTable columns={cols} data={docs} emptyMessage="No documents uploaded yet." />
+      <Modal open={open} onClose={() => setOpen(false)} title="Upload Document" size="lg">
+        <div className="space-y-4">
+          <Field label="Document Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <Field label="Category" select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+            {['Lease Agreement', 'Inspection Report', 'Notice', 'Invoice', 'Compliance', 'Other'].map(c => <option key={c}>{c}</option>)}
+          </Field>
+          <Field label="Property" select value={form.propertyId} onChange={e => setForm(f => ({ ...f, propertyId: e.target.value }))}>
+            <option value="">Select property…</option>
+            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Field>
+          <Field label="Tenant (optional)" select value={form.tenantId} onChange={e => setForm(f => ({ ...f, tenantId: e.target.value }))}>
+            <option value="">Select tenant…</option>
+            {tenants.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
+          </Field>
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">File *</span>
+            <input type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} className="text-sm text-ink-secondary" />
+          </div>
+          <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <button onClick={save} disabled={uploading} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+            {uploading ? 'Uploading…' : 'Upload Document'}
+          </button>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function Settings() {
+  const { user } = useAuth()
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-bold text-ink">Settings</h2>
+      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
+        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
+        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
+          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 export default function PropertyDashboard() {
@@ -1052,10 +1319,15 @@ export default function PropertyDashboard() {
         <Route path="statements" element={<OwnerStatements />} />
         <Route path="commission" element={<Commission />} />
         <Route path="maintenance" element={<Maintenance />} />
+        <Route path="owners" element={<Owners />} />
+        <Route path="appointments" element={<PropertyAppointments />} />
+        <Route path="messages" element={<Messages />} />
+        <Route path="documents" element={<Documents />} />
         <Route path="campaigns" element={<CampaignsModule industry="property" />} />
         <Route path="profile" element={<ProfilePage industry="property" />} />
         <Route path="popia" element={<PopiaModule />} />
-        <Route path="*" element={<SimplePage title="Coming Soon" />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
       </Routes>
     </DashboardLayout>
   )

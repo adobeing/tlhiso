@@ -2501,8 +2501,109 @@ function Referrals() {
 }
 
 
-function SimplePage({ title }) {
-  return <div><h2 className="text-base font-bold text-ink mb-3">{title}</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>
+// ── Messages ──────────────────────────────────────────────────────────────────
+function Messages() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const messages = useCollection(uid ? `users/${uid}/messages` : null)
+  const sorted = useMemo(() => [...messages].sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0)), [messages])
+  const counts = useMemo(() => { const c = { sms: 0, email: 0, whatsapp: 0 }; messages.forEach(m => { if (m.type in c) c[m.type]++ }); return c }, [messages])
+  const channelBadge = t => ({ sms: 'bg-blue-100 text-blue-600', email: 'bg-emerald-100 text-emerald-700', whatsapp: 'bg-green-100 text-green-600' }[t] ?? 'bg-gray-100 text-gray-500')
+  const cols = [
+    { key: 'type', label: 'Channel', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${channelBadge(r.type)}`}>{r.type}</span> },
+    { key: 'to', label: 'Recipient' },
+    { key: 'body', label: 'Message', render: r => <span className="line-clamp-2 max-w-xs text-sm text-ink-secondary">{r.body}</span> },
+    { key: 'module', label: 'Source', render: r => <span className="capitalize text-xs text-ink-secondary">{(r.module || '—').replace(/-/g, ' ')}</span> },
+    { key: 'sentAt', label: 'Sent', render: r => <span className="text-xs text-ink-secondary">{r.sentAt?.toDate?.()?.toLocaleDateString('en-ZA') ?? '—'}</span> },
+  ]
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-base font-bold text-ink">Messages</h2><p className="mt-0.5 text-sm text-ink-secondary">Log of all messages sent from your account</p></div>
+      <div className="grid grid-cols-3 gap-4">
+        {[{ label: 'SMS Sent', val: counts.sms, color: 'text-blue-600' }, { label: 'Emails Sent', val: counts.email, color: 'text-emerald-600' }, { label: 'WhatsApp Sent', val: counts.whatsapp, color: 'text-green-600' }].map(s => (
+          <div key={s.label} className="rounded-card border border-border bg-white p-4 shadow-card text-center">
+            <p className={`text-2xl font-extrabold ${s.color}`}>{s.val}</p>
+            <p className="mt-1 text-xs font-semibold text-ink-secondary">{s.label}</p>
+          </div>
+        ))}
+      </div>
+      <DataTable columns={cols} data={sorted} emptyMessage="No messages sent yet. Use Campaigns or send appointment reminders to get started." />
+    </div>
+  )
+}
+
+// ── Surveys ───────────────────────────────────────────────────────────────────
+function Surveys() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const surveys = useCollection(uid ? `users/${uid}/surveys` : null)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ title: '', description: '', questions: [''] })
+  function addQ() { setForm(f => ({ ...f, questions: [...f.questions, ''] })) }
+  function updateQ(i, v) { setForm(f => { const q = [...f.questions]; q[i] = v; return { ...f, questions: q } }) }
+  function removeQ(i) { setForm(f => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })) }
+  async function save() {
+    if (!uid || !form.title) return
+    await addDoc(collection(db, 'users', uid, 'surveys'), { ...form, questions: form.questions.filter(q => q.trim()), status: 'Draft', responses: 0, createdAt: serverTimestamp() })
+    setForm({ title: '', description: '', questions: [''] }); setOpen(false)
+  }
+  const statusColor = s => ({ Draft: 'bg-gray-100 text-gray-600', Active: 'bg-green-100 text-green-700', Closed: 'bg-amber-100 text-amber-700' }[s] ?? '')
+  const cols = [
+    { key: 'title', label: 'Survey' },
+    { key: 'questions', label: 'Questions', render: r => `${(r.questions || []).length}` },
+    { key: 'responses', label: 'Responses', render: r => r.responses ?? 0 },
+    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status || 'Draft'}</span> },
+    { key: 'actions', label: '', sortable: false, render: r => (
+      <div className="flex gap-1">
+        {r.status !== 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Active' }) }} className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Activate</button>}
+        {r.status === 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Closed' }) }} className="rounded px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50">Close</button>}
+        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this survey? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'surveys', r.id)) }} className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
+    )},
+  ]
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div><h2 className="text-base font-bold text-ink">Surveys</h2><p className="mt-0.5 text-sm text-ink-secondary">Collect feedback from patients</p></div>
+        <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]"><PlusCircle size={15} /> New Survey</button>
+      </div>
+      <DataTable columns={cols} data={surveys} emptyMessage="No surveys yet." />
+      <Modal open={open} onClose={() => setOpen(false)} title="New Survey" size="lg">
+        <div className="space-y-4">
+          <Field label="Survey Title *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+          <Field label="Description" textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          <div>
+            <p className="mb-2 text-xs font-semibold text-ink-secondary">Questions</p>
+            {form.questions.map((q, i) => (
+              <div key={i} className="mb-2 flex items-center gap-2">
+                <input value={q} onChange={e => updateQ(i, e.target.value)} placeholder={`Question ${i + 1}`}
+                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                {form.questions.length > 1 && <button onClick={() => removeQ(i)} className="text-red-400 hover:text-red-600"><X size={15} /></button>}
+              </div>
+            ))}
+            <button onClick={addQ} className="text-xs font-semibold text-primary hover:underline">+ Add question</button>
+          </div>
+          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Create Survey</button>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function Settings() {
+  const { user } = useAuth()
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-bold text-ink">Settings</h2>
+      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
+        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
+        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
+          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 export default function MedicalDashboard() {
@@ -2516,10 +2617,13 @@ export default function MedicalDashboard() {
         <Route path="practitioners" element={<Practitioners />} />
         <Route path="reports" element={<Reports />} />
         <Route path="referrals" element={<Referrals />} />
+        <Route path="messages" element={<Messages />} />
+        <Route path="surveys" element={<Surveys />} />
         <Route path="campaigns" element={<CampaignsModule industry="medical" />} />
         <Route path="profile" element={<ProfilePage industry="medical" />} />
         <Route path="popia" element={<PopiaModule />} />
-        <Route path="*" element={<SimplePage title="Coming Soon" />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
       </Routes>
     </DashboardLayout>
   )
