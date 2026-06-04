@@ -10,7 +10,9 @@ import ProfilePage from '../../shared/ProfilePage'
 import PopiaModule from '../../shared/PopiaModule'
 import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db } from '../../../services/firebase'
-import { PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { PlusCircle, Pencil, Trash2, Eye } from 'lucide-react'
+import CampaignsModule from '../../shared/CampaignsModule'
+import SetupChecklist from '../../shared/SetupChecklist'
 
 // ── Shared form field ─────────────────────────────────────────────────────────
 function Field({ label, error, textarea, select, children, ...props }) {
@@ -27,8 +29,42 @@ function Field({ label, error, textarea, select, children, ...props }) {
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
+// ── Shared layout helpers ───────────────────────────────────────────────────
+function PageHead({ title, subtitle, action }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-bold text-ink">{title}</h2>
+        {subtitle && <p className="mt-0.5 text-sm text-ink-secondary">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  )
+}
+
+function AddButton({ onClick, children }) {
+  return (
+    <button onClick={onClick}
+      className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#4e7d6d]">
+      <PlusCircle size={15} /> {children}
+    </button>
+  )
+}
+
+function SectionCard({ title, action, children }) {
+  return (
+    <div className="rounded-card border border-border bg-white shadow-card">
+      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+        <h3 className="text-sm font-bold text-ink">{title}</h3>
+        {action}
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  )
+}
+
 function Overview() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const uid = user?.uid
   const clients = useCollection(uid ? `users/${uid}/customers` : null)
   const invoices = useCollection(uid ? `users/${uid}/invoices` : null)
@@ -40,14 +76,18 @@ function Overview() {
 
   return (
     <div className="space-y-6">
+      <SetupChecklist industry="b2b" />
+      <PageHead
+        title={`Welcome back${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`}
+        subtitle="Your business at a glance."
+      />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Clients" value={clients.length} icon="👥" />
-        <StatCard label="Outstanding Invoices" value={outstanding} icon="🧾" color="orange" />
+        <StatCard label="Outstanding Invoices" value={outstanding} icon="🧾" color="orange" trend={outstanding ? 'Awaiting payment' : 'All settled'} trendTone={outstanding ? 'down' : 'up'} />
         <StatCard label="Active Projects" value={active} icon="📁" color="blue" />
         <StatCard label="Messages Sent" value={messages.length} icon="✉️" color="purple" />
       </div>
-      <div className="rounded-card border border-border bg-white p-5 shadow-card">
-        <h3 className="mb-4 text-sm font-bold text-ink">Quick Actions</h3>
+      <SectionCard title="Quick Actions">
         <div className="flex flex-wrap gap-3">
           {[
             { label: '+ New Invoice', href: '/b2b/invoices' },
@@ -55,21 +95,24 @@ function Overview() {
             { label: 'Send Message', href: '/b2b/messages' },
           ].map(a => (
             <a key={a.label} href={a.href}
-              className="rounded-xl border border-primary/30 bg-primary-light px-4 py-2 text-sm font-semibold text-primary hover:bg-primary hover:text-white transition">
+              className="rounded-lg border border-primary/30 bg-primary-light px-4 py-2 text-sm font-semibold text-primary transition hover:bg-primary hover:text-white">
               {a.label}
             </a>
           ))}
         </div>
-      </div>
-      <DataTable
-        columns={[
-          { key: 'name', label: 'Client' },
-          { key: 'email', label: 'Email' },
-          { key: 'phone', label: 'Phone' },
-        ]}
-        data={clients.slice(0, 5)}
-        emptyMessage="No clients yet. Add your first client."
-      />
+      </SectionCard>
+      <SectionCard title="Recent Clients"
+        action={<a href="/b2b/clients" className="text-xs font-semibold text-primary hover:underline">View all →</a>}>
+        <DataTable
+          columns={[
+            { key: 'name', label: 'Client' },
+            { key: 'email', label: 'Email' },
+            { key: 'phone', label: 'Phone' },
+          ]}
+          data={clients.slice(0, 5)}
+          emptyMessage="No clients yet. Add your first client."
+        />
+      </SectionCard>
     </div>
   )
 }
@@ -81,6 +124,9 @@ function Clients() {
   const clients = useCollection(uid ? `users/${uid}/customers` : null)
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ name: '', company: '', email: '', phone: '', tags: '' })
+  const [viewing, setViewing] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [editForm, setEditForm] = useState({ name: '', company: '', email: '', phone: '', tags: '' })
 
   async function save() {
     if (!uid || !form.name) return
@@ -89,6 +135,14 @@ function Clients() {
       createdAt: serverTimestamp(),
     })
     setOpen(false); setForm({ name: '', company: '', email: '', phone: '', tags: '' })
+  }
+
+  async function saveEdit() {
+    if (!uid || !editForm.name || !editing) return
+    await updateDoc(doc(db, 'users', uid, 'customers', editing.id), {
+      ...editForm, tags: editForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+    })
+    setEditing(null)
   }
 
   const cols = [
@@ -100,21 +154,24 @@ function Clients() {
       <span key={t} className="mr-1 rounded-full bg-primary-light px-2 py-0.5 text-[11px] font-semibold text-primary">{t}</span>
     ))},
     { key: 'actions', label: '', sortable: false, render: r => (
-      <button onClick={e => { e.stopPropagation(); deleteDoc(doc(db, 'users', uid, 'customers', r.id)) }}
-        className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      <div className="flex items-center gap-1">
+        <button onClick={e => { e.stopPropagation(); setViewing(r) }}
+          title="View" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
+        <button onClick={e => { e.stopPropagation(); setEditing(r); setEditForm({ name: r.name||'', company: r.company||'', email: r.email||'', phone: r.phone||'', tags: (r.tags||[]).join(', ') }) }}
+          title="Edit" className="rounded p-1 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
+        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this client? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'customers', r.id)) }}
+          title="Delete" className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
     )},
   ]
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Clients</h2>
-        <button onClick={() => setOpen(true)}
-          className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-          <PlusCircle size={15} /> Add Client
-        </button>
-      </div>
+      <PageHead title="Clients" subtitle="Your client accounts & contacts"
+        action={<AddButton onClick={() => setOpen(true)}>Add Client</AddButton>} />
       <DataTable columns={cols} data={clients} emptyMessage="No clients yet." />
+
+      {/* Add modal */}
       <Modal open={open} onClose={() => setOpen(false)} title="New Client">
         <div className="space-y-4">
           <Field label="Full name *" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
@@ -123,6 +180,45 @@ function Clients() {
           <Field label="Phone (+27…)" value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} />
           <Field label="Tags (comma-separated)" value={form.tags} onChange={e => setForm(f => ({...f, tags: e.target.value}))} />
           <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">Save Client</button>
+        </div>
+      </Modal>
+
+      {/* View modal */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Client Details">
+        {viewing && (
+          <div className="space-y-3 text-sm">
+            {[
+              { label: 'Full Name', value: viewing.name },
+              { label: 'Company', value: viewing.company },
+              { label: 'Email', value: viewing.email },
+              { label: 'Phone', value: viewing.phone },
+            ].map(({ label, value }) => value ? (
+              <div key={label} className="flex flex-col gap-0.5 rounded-xl bg-surface-2 px-4 py-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</span>
+                <span className="text-sm text-ink">{value}</span>
+              </div>
+            ) : null)}
+            {viewing.tags?.length > 0 && (
+              <div className="rounded-xl bg-surface-2 px-4 py-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Tags</span>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {viewing.tags.map(t => <span key={t} className="rounded-full bg-primary-light px-2.5 py-0.5 text-[11px] font-semibold text-primary">{t}</span>)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit Client">
+        <div className="space-y-4">
+          <Field label="Full name *" value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))} />
+          <Field label="Company" value={editForm.company} onChange={e => setEditForm(f => ({...f, company: e.target.value}))} />
+          <Field label="Email" type="email" value={editForm.email} onChange={e => setEditForm(f => ({...f, email: e.target.value}))} />
+          <Field label="Phone (+27…)" value={editForm.phone} onChange={e => setEditForm(f => ({...f, phone: e.target.value}))} />
+          <Field label="Tags (comma-separated)" value={editForm.tags} onChange={e => setEditForm(f => ({...f, tags: e.target.value}))} />
+          <button onClick={saveEdit} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">Save Changes</button>
         </div>
       </Modal>
     </div>
@@ -167,7 +263,7 @@ function Invoices() {
       <div className="flex gap-2">
         <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'invoices', r.id), { status: 'Paid' }) }}
           className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Mark Paid</button>
-        <button onClick={e => { e.stopPropagation(); deleteDoc(doc(db, 'users', uid, 'invoices', r.id)) }}
+        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this invoice? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'invoices', r.id)) }}
           className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
       </div>
     )},
@@ -175,12 +271,8 @@ function Invoices() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Invoices</h2>
-        <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-          <PlusCircle size={15} /> New Invoice
-        </button>
-      </div>
+      <PageHead title="Invoices" subtitle="Create, send and track invoices"
+        action={<AddButton onClick={() => setOpen(true)}>New Invoice</AddButton>} />
       <DataTable columns={cols} data={invoices} />
       <Modal open={open} onClose={() => setOpen(false)} title="New Invoice" size="lg">
         <div className="space-y-4">
@@ -238,50 +330,6 @@ function Settings() {
   )
 }
 
-// ── Campaigns stub ────────────────────────────────────────────────────────────
-function Campaigns() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const campaigns = useCollection(uid ? `users/${uid}/campaigns` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ subject: '', body: '', type: 'email' })
-
-  async function save() {
-    if (!uid) return
-    await addDoc(collection(db, 'users', uid, 'campaigns'), { ...form, status: 'Draft', createdAt: serverTimestamp() })
-    setOpen(false); setForm({ subject: '', body: '', type: 'email' })
-  }
-
-  const cols = [
-    { key: 'subject', label: 'Subject' },
-    { key: 'type', label: 'Type' },
-    { key: 'status', label: 'Status', render: r => <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{r.status}</span> },
-  ]
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Campaigns</h2>
-        <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-          <PlusCircle size={15} /> New Campaign
-        </button>
-      </div>
-      <DataTable columns={cols} data={campaigns} emptyMessage="No campaigns yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Campaign">
-        <div className="space-y-4">
-          <Field label="Type" select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))}>
-            <option value="email">Email</option>
-            <option value="sms">SMS</option>
-            <option value="whatsapp">WhatsApp</option>
-          </Field>
-          <Field label="Subject" value={form.subject} onChange={e => setForm(f => ({...f, subject: e.target.value}))} />
-          <Field label="Body" textarea value={form.body} onChange={e => setForm(f => ({...f, body: e.target.value}))} />
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Campaign</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
 
 // ── Router wrapper ────────────────────────────────────────────────────────────
 const PAGE_TITLES = {
@@ -304,7 +352,7 @@ export default function B2BDashboard() {
         <Route path="dashboard" element={<Overview />} />
         <Route path="clients" element={<Clients />} />
         <Route path="invoices" element={<Invoices />} />
-        <Route path="campaigns" element={<Campaigns />} />
+        <Route path="campaigns" element={<CampaignsModule industry="b2b" />} />
         <Route path="profile" element={<ProfilePage industry="b2b" />} />
         <Route path="popia" element={<PopiaModule />} />
         <Route path="settings" element={<Settings />} />
