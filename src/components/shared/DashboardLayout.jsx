@@ -121,20 +121,20 @@ export default function DashboardLayout({ industry, children, pageTitle }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 py-4">
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
         {navItems.map((item) => {
           const Icon = item.icon
           return (
             <NavLink key={item.to} to={item.to} end={item.to.endsWith('/dashboard') || item.to === '/superadmin'}
               className={({ isActive }) =>
-                `mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                `mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-150 ${
                   isActive
-                    ? 'bg-primary/20 font-semibold text-white'
-                    : 'text-sidebar-text hover:bg-white/8 hover:text-white'
+                    ? 'bg-primary/25 font-semibold text-white shadow-sm'
+                    : 'text-sidebar-text hover:bg-white/10 hover:text-white'
                 } ${collapsed ? 'justify-center' : ''}`
               }>
-              <Icon size={17} className="flex-shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              <Icon size={16} className="flex-shrink-0" />
+              {!collapsed && <span className="tracking-[-0.01em]">{item.label}</span>}
             </NavLink>
           )
         })}
@@ -171,24 +171,26 @@ export default function DashboardLayout({ industry, children, pageTitle }) {
       {/* Main area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex flex-shrink-0 items-center justify-between border-b border-border bg-white px-4 py-3 lg:px-6">
+        <header className="flex flex-shrink-0 items-center justify-between border-b border-border/70 bg-white px-4 py-2.5 shadow-sm lg:px-6">
           <div className="flex items-center gap-3">
             <button onClick={() => setMobileOpen(true)}
-              className="rounded-lg p-2 hover:bg-surface-2 lg:hidden">
+              className="rounded-xl p-2 text-ink-secondary transition hover:bg-surface-2 hover:text-ink lg:hidden">
               <Menu size={18} />
             </button>
-            <h1 className="text-base font-bold text-ink">{pageTitle}</h1>
+            <h1 className="text-sm font-semibold text-ink">{pageTitle}</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <div className="relative hidden md:block">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-secondary" />
-              <input placeholder="Search…"
-                className="rounded-xl border border-border bg-surface-2 pl-9 pr-4 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 w-52" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-secondary/60" />
+              <input
+                placeholder="Search…"
+                className="w-56 rounded-full border border-border bg-surface-2 py-2 pl-9 pr-4 text-sm outline-none transition focus:border-primary focus:bg-white focus:ring-2 focus:ring-primary/20"
+              />
             </div>
-            <button className="relative rounded-xl border border-border p-2 hover:bg-surface-2">
-              <Bell size={17} />
+            <button className="relative rounded-full border border-border p-2 text-ink-secondary transition hover:bg-surface-2 hover:text-ink">
+              <Bell size={16} />
             </button>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-white shadow-sm">
               {(profile?.name ?? user?.email ?? '?').charAt(0).toUpperCase()}
             </div>
           </div>
