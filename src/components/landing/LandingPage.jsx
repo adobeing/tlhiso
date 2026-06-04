@@ -6,20 +6,20 @@ const FEATURES = {
   b2b: [
     { icon: '📋', title: 'Client Management', desc: 'Track all your client accounts, contacts, and communication history in one place.' },
     { icon: '🧾', title: 'Invoicing & Quotations', desc: 'Create professional invoices with VAT, send via email, SMS or WhatsApp.' },
-    { icon: '📊', title: 'Projects & Tasks', desc: 'Manage projects with a kanban board, deadlines, and progress tracking.' },
+    { icon: '📁', title: 'Projects & Tasks', desc: 'Manage projects with deadlines, milestones, and progress tracking.' },
     { icon: '📣', title: 'Email & SMS Campaigns', desc: 'Reach your clients with targeted marketing campaigns at scale.' },
   ],
   medical: [
     { icon: '🩺', title: 'Patient Records', desc: 'Comprehensive patient profiles with medical history, allergies, and chronic conditions.' },
-    { icon: '🔊', title: 'Audio Transcription', desc: 'Record consultations and auto-transcribe using AI — no note-taking needed.' },
-    { icon: '📄', title: 'Referral Letters', desc: 'Generate and track specialist referrals with PDF export.' },
-    { icon: '📅', title: 'Appointment Calendar', desc: 'Multi-practitioner scheduling with automated patient reminders.' },
+    { icon: '🎙️', title: 'Audio Transcription', desc: 'Record consultations and auto-transcribe using AI — no note-taking needed.' },
+    { icon: '📄', title: 'Referral Letters', desc: 'Generate and track specialist referrals with branded PDF export.' },
+    { icon: '📅', title: 'Appointment Calendar', desc: 'Multi-practitioner scheduling with automated patient SMS reminders.' },
   ],
   property: [
-    { icon: '🗺️', title: 'Property Map', desc: 'Interactive map showing all your properties with occupancy status at a glance.' },
-    { icon: '📁', title: 'Tenant Documents', desc: 'Store lease agreements, IDs, proof of income securely in the cloud.' },
+    { icon: '🏘️', title: 'Property Register', desc: 'Manage your full portfolio with occupancy, financials, and maintenance in one view.' },
+    { icon: '📁', title: 'Tenant Documents', desc: 'Store lease agreements, IDs, and proof of income securely in the cloud.' },
     { icon: '🔧', title: 'Maintenance Log', desc: 'Track maintenance requests, assign contractors, and close out issues.' },
-    { icon: '💵', title: 'Rent Statements', desc: 'Auto-generate and send monthly statements to all tenants.' },
+    { icon: '💵', title: 'Rent Roll & Statements', desc: 'Track payments, arrears, and auto-generate owner statements as PDF.' },
   ],
   retail: [
     { icon: '💇', title: 'Customer Bookings', desc: 'Calendar-based appointment booking with confirmations and reminders.' },
@@ -32,30 +32,34 @@ const FEATURES = {
 const TESTIMONIALS = [
   {
     name: 'Naledi Khumalo',
-    role: 'Medical Rep · Khumalo Surgical Supplies',
+    role: 'Medical Rep',
+    company: 'Khumalo Surgical Supplies',
     industry: 'B2B',
-    quote: 'I sell surgical equipment to hospitals. The B2B mode lets me manage all my client accounts, track who I\'ve contacted, and send professional follow-ups in minutes.',
+    quote: 'The B2B mode lets me manage all my client accounts, track who I\'ve contacted, and send professional follow-ups in minutes.',
     stars: 5,
   },
   {
     name: 'Dr. Thabo Sithole',
-    role: 'General Practitioner · Sithole Family Practice',
+    role: 'General Practitioner',
+    company: 'Sithole Family Practice',
     industry: 'Medical',
-    quote: 'The audio transcription alone saves me 45 minutes per day. My patients love the automated reminders, and my reception staff loves the appointment calendar.',
+    quote: 'The audio transcription alone saves me 45 minutes per day. My patients love the automated reminders.',
     stars: 5,
   },
   {
     name: 'Yolanda van der Berg',
-    role: 'Property Manager · Cape Coastal Properties',
+    role: 'Property Manager',
+    company: 'Cape Coastal Properties',
     industry: 'Property',
-    quote: 'Managing 40+ units used to be a nightmare. Now I send statements to all tenants with one click and track maintenance from my phone.',
+    quote: 'Managing 40+ units used to be a nightmare. Now I send statements to all tenants with one click.',
     stars: 5,
   },
   {
     name: 'Bongani Mokoena',
-    role: 'Owner · Bongz Barbershop, Soweto',
+    role: 'Owner',
+    company: 'Bongz Barbershop, Soweto',
     industry: 'Retail',
-    quote: 'The weekly deals feature doubled my walk-ins. I send a WhatsApp blast on Monday mornings and I\'m fully booked by Wednesday.',
+    quote: 'The weekly deals feature doubled my walk-ins. I send a WhatsApp blast Monday morning and I\'m fully booked by Wednesday.',
     stars: 5,
   },
 ]
@@ -90,80 +94,119 @@ const PLANS = [
   },
 ]
 
-function StarRating({ count }) {
-  return <span className="text-amber-400">{'★'.repeat(count)}</span>
+const STATS = [
+  { value: '4', label: 'Industry verticals' },
+  { value: '3', label: 'Messaging channels' },
+  { value: '250k', label: 'Messages / month' },
+  { value: '100%', label: 'South African' },
+]
+
+function Stars({ count }) {
+  return (
+    <div className="flex gap-0.5">
+      {Array.from({ length: count }).map((_, i) => (
+        <span key={i} className="text-amber-400 text-sm">★</span>
+      ))}
+    </div>
+  )
 }
 
 export default function LandingPage() {
-  const [activeFeatureTab, setActiveFeatureTab] = useState('b2b')
+  const [activeTab, setActiveTab] = useState('b2b')
 
   return (
-    <div className="min-h-screen font-sans bg-white">
-      {/* NAV */}
-      <nav className="sticky top-0 z-50 border-b border-border bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+    <div className="min-h-screen bg-white font-sans">
+
+      {/* ── Nav ── */}
+      <nav className="sticky top-0 z-50 border-b border-border/60 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
           <span className="text-xl font-extrabold tracking-tight text-ink">Tlhiso</span>
-          <div className="hidden gap-8 text-sm font-medium text-ink-secondary md:flex">
-            <a href="#features" className="hover:text-primary">Features</a>
-            <a href="#testimonials" className="hover:text-primary">Reviews</a>
-            <a href="#pricing" className="hover:text-primary">Pricing</a>
+          <div className="hidden items-center gap-8 text-sm font-medium text-ink-secondary md:flex">
+            <a href="#features" className="transition hover:text-primary">Features</a>
+            <a href="#testimonials" className="transition hover:text-primary">Reviews</a>
+            <a href="#pricing" className="transition hover:text-primary">Pricing</a>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/login" className="text-sm font-semibold text-ink hover:text-primary">Sign in</Link>
-            <Link to="/register" className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-              Start Free Trial
+            <Link to="/login"
+              className="text-sm font-semibold text-ink-secondary transition hover:text-ink">
+              Sign in
+            </Link>
+            <Link to="/register"
+              className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4e7d6d]">
+              Get started free
             </Link>
           </div>
         </div>
       </nav>
 
-      {/* HERO */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-[#f0f9f4] via-white to-[#fafaf8] px-6 py-24 text-center">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -left-40 -top-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-          <div className="absolute -bottom-20 -right-20 h-80 w-80 rounded-full bg-primary/8 blur-3xl" />
+      {/* ── Hero ── */}
+      <section className="relative overflow-hidden bg-gradient-to-b from-[#f0f9f5] to-white px-6 pb-20 pt-24">
+        {/* Decorative blobs */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -left-64 -top-64 h-[500px] w-[500px] rounded-full bg-primary/8 blur-3xl" />
+          <div className="absolute -right-32 top-0 h-96 w-96 rounded-full bg-primary/6 blur-3xl" />
         </div>
-        <div className="relative mx-auto max-w-3xl">
-          <div className="mb-4 inline-flex items-center rounded-full border border-primary/30 bg-primary-light px-4 py-1.5 text-xs font-semibold text-primary">
+
+        <div className="relative mx-auto max-w-4xl text-center">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary-light px-4 py-1.5 text-xs font-semibold text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
             Built for South African businesses
           </div>
-          <h1 className="text-5xl font-extrabold tracking-tight text-ink md:text-6xl">
+
+          <h1 className="text-5xl font-extrabold leading-[1.1] tracking-tight text-ink md:text-6xl lg:text-7xl">
             Run Your Business.<br />
             <span className="text-primary">Smarter.</span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-lg text-ink-secondary">
+
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ink-secondary">
             One platform for Medical practices, Property managers, B2B companies, and Consumer businesses.
-            Messaging, invoicing, scheduling &amp; compliance — all in one place.
+            Messaging, invoicing, scheduling — all in one place.
           </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-4">
+
+          <div className="mt-10 flex flex-wrap justify-center gap-3">
             <Link to="/register"
-              className="rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/30 hover:bg-[#4e7d6d]">
-              Start Free Trial
+              className="rounded-full bg-primary px-8 py-3.5 text-sm font-semibold text-white shadow-md shadow-primary/25 transition hover:bg-[#4e7d6d] hover:shadow-lg hover:shadow-primary/30">
+              Start free trial
             </Link>
             <a href="#features"
-              className="rounded-xl border border-border bg-white px-6 py-3 text-sm font-semibold text-ink hover:bg-surface-2">
-              See Demo ↓
+              className="rounded-full border border-border bg-white px-8 py-3.5 text-sm font-semibold text-ink shadow-sm transition hover:bg-surface-2">
+              See features ↓
             </a>
           </div>
-          <p className="mt-4 text-xs text-ink-secondary">No credit card required · Cancel anytime</p>
+
+          <p className="mt-4 text-xs text-ink-secondary/70">No credit card required · Cancel anytime</p>
+        </div>
+
+        {/* Stats strip */}
+        <div className="relative mx-auto mt-20 max-w-3xl">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            {STATS.map(s => (
+              <div key={s.label} className="rounded-2xl border border-border/60 bg-white px-5 py-4 text-center shadow-sm">
+                <p className="text-2xl font-extrabold tracking-tight text-primary">{s.value}</p>
+                <p className="mt-0.5 text-xs font-medium text-ink-secondary">{s.label}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* INDUSTRY CARDS */}
-      <section className="bg-white px-6 py-20">
+      {/* ── Industries ── */}
+      <section className="bg-white px-6 py-24">
         <div className="mx-auto max-w-7xl">
-          <p className="label-caps mb-2 text-center text-xs text-ink-secondary">Four verticals. One platform.</p>
-          <h2 className="mb-12 text-center text-3xl font-bold text-ink">Built for your industry</h2>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mb-14 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Four verticals. One platform.</p>
+            <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Built for your industry</h2>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {INDUSTRY_LIST.map((ind) => (
               <div key={ind.key}
-                className="group rounded-card border border-border p-6 shadow-card transition hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg">
+                className="group flex flex-col rounded-3xl border border-border/70 bg-white p-7 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-card-hover">
                 <span className="text-4xl">{ind.icon}</span>
                 <h3 className="mt-4 text-base font-bold text-ink">{ind.label}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{ind.description}</p>
+                <p className="mt-2 flex-1 text-sm leading-relaxed text-ink-secondary">{ind.description}</p>
                 <Link to="/register"
-                  className="mt-4 inline-block text-sm font-semibold text-primary group-hover:underline">
-                  Learn more →
+                  className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-primary transition hover:gap-2">
+                  Get started <span>→</span>
                 </Link>
               </div>
             ))}
@@ -171,28 +214,36 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FEATURES */}
-      <section id="features" className="bg-surface-2 px-6 py-20">
+      {/* ── Features ── */}
+      <section id="features" className="bg-surface-2 px-6 py-24">
         <div className="mx-auto max-w-7xl">
-          <p className="label-caps mb-2 text-center text-xs text-ink-secondary">What you get</p>
-          <h2 className="mb-10 text-center text-3xl font-bold text-ink">Industry-specific features</h2>
-          <div className="mb-8 flex flex-wrap justify-center gap-2">
+          <div className="mb-12 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">What you get</p>
+            <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Industry-specific features</h2>
+          </div>
+
+          {/* Tab bar */}
+          <div className="mb-10 flex flex-wrap justify-center gap-2">
             {INDUSTRY_LIST.map((ind) => (
-              <button key={ind.key} onClick={() => setActiveFeatureTab(ind.key)}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  activeFeatureTab === ind.key
-                    ? 'bg-primary text-white'
-                    : 'bg-white border border-border text-ink-secondary hover:border-primary/50'
+              <button key={ind.key} onClick={() => setActiveTab(ind.key)}
+                className={`rounded-full px-5 py-2 text-sm font-semibold transition-all ${
+                  activeTab === ind.key
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'border border-border bg-white text-ink-secondary hover:border-primary/40 hover:text-ink'
                 }`}>
                 {ind.icon} {ind.label}
               </button>
             ))}
           </div>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {FEATURES[activeFeatureTab].map((f) => (
-              <div key={f.title} className="rounded-card border border-border bg-white p-6 shadow-card">
-                <span className="text-3xl">{f.icon}</span>
-                <h3 className="mt-3 text-base font-bold text-ink">{f.title}</h3>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {FEATURES[activeTab].map((f, i) => (
+              <div key={f.title}
+                className="rounded-3xl border border-border/70 bg-white p-6 shadow-card transition-shadow hover:shadow-card-hover">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-light text-2xl">
+                  {f.icon}
+                </div>
+                <h3 className="mt-4 text-sm font-bold text-ink">{f.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{f.desc}</p>
               </div>
             ))}
@@ -200,26 +251,50 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* TESTIMONIALS */}
-      <section id="testimonials" className="bg-white px-6 py-20">
+      {/* ── Messaging channels strip ── */}
+      <section className="border-y border-border/60 bg-white px-6 py-14">
+        <div className="mx-auto max-w-4xl text-center">
+          <p className="mb-8 text-xs font-semibold uppercase tracking-widest text-primary">Three channels. One inbox.</p>
+          <div className="flex flex-wrap items-center justify-center gap-6 md:gap-12">
+            {[
+              { icon: '💬', label: 'SMS', sub: 'via BulkSMS', color: 'bg-blue-50 text-blue-600' },
+              { icon: '✉️', label: 'Email', sub: 'via SendGrid', color: 'bg-emerald-50 text-emerald-700' },
+              { icon: '📱', label: 'WhatsApp', sub: 'via Twilio', color: 'bg-green-50 text-green-600' },
+            ].map(ch => (
+              <div key={ch.label} className="flex flex-col items-center gap-2">
+                <div className={`flex h-14 w-14 items-center justify-center rounded-2xl text-2xl ${ch.color}`}>
+                  {ch.icon}
+                </div>
+                <p className="text-sm font-bold text-ink">{ch.label}</p>
+                <p className="text-xs text-ink-secondary">{ch.sub}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Testimonials ── */}
+      <section id="testimonials" className="bg-surface-2 px-6 py-24">
         <div className="mx-auto max-w-7xl">
-          <p className="label-caps mb-2 text-center text-xs text-ink-secondary">Don't just take our word for it</p>
-          <h2 className="mb-12 text-center text-3xl font-bold text-ink">Loved by South African businesses</h2>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <div className="mb-14 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Real customers</p>
+            <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Loved by South African businesses</h2>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
             {TESTIMONIALS.map((t) => (
               <div key={t.name}
-                className="flex flex-col justify-between rounded-card border border-border p-6 shadow-card">
+                className="flex flex-col justify-between rounded-3xl border border-border/70 bg-white p-6 shadow-card">
                 <div>
-                  <StarRating count={t.stars} />
-                  <p className="mt-3 text-sm leading-relaxed text-ink">"{t.quote}"</p>
+                  <Stars count={t.stars} />
+                  <p className="mt-4 text-sm leading-relaxed text-ink">"{t.quote}"</p>
                 </div>
-                <div className="mt-5 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-light text-sm font-bold text-primary">
+                <div className="mt-6 flex items-center gap-3 border-t border-border/50 pt-5">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary-light text-sm font-bold text-primary">
                     {t.name.charAt(0)}
                   </div>
-                  <div>
-                    <p className="text-xs font-bold text-ink">{t.name}</p>
-                    <p className="text-[11px] text-ink-secondary">{t.role}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold text-ink">{t.name}</p>
+                    <p className="truncate text-[11px] text-ink-secondary">{t.role} · {t.company}</p>
                   </div>
                 </div>
               </div>
@@ -228,41 +303,47 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PRICING */}
-      <section id="pricing" className="bg-surface-2 px-6 py-20">
+      {/* ── Pricing ── */}
+      <section id="pricing" className="bg-white px-6 py-24">
         <div className="mx-auto max-w-5xl">
-          <p className="label-caps mb-2 text-center text-xs text-ink-secondary">Simple pricing</p>
-          <h2 className="mb-12 text-center text-3xl font-bold text-ink">Choose Your Plan</h2>
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="mb-14 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Simple pricing</p>
+            <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Choose your plan</h2>
+            <p className="mx-auto mt-4 max-w-md text-sm text-ink-secondary">All plans include every industry vertical. Pay for messaging volume, not features.</p>
+          </div>
+          <div className="grid gap-5 md:grid-cols-3">
             {PLANS.map((p) => (
               <div key={p.name}
-                className={`relative flex flex-col rounded-card border p-8 shadow-card ${
+                className={`relative flex flex-col rounded-3xl border p-8 shadow-card transition-shadow hover:shadow-card-hover ${
                   p.popular
-                    ? 'border-primary bg-white ring-2 ring-primary ring-offset-2'
-                    : 'border-border bg-white'
+                    ? 'border-primary bg-white ring-2 ring-primary ring-offset-4'
+                    : 'border-border/70 bg-white'
                 }`}>
                 {p.popular && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white">
-                    Most Popular
+                  <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-primary px-4 py-1 text-[11px] font-bold uppercase tracking-wider text-white shadow-sm">
+                    Most popular
                   </span>
                 )}
-                <h3 className="text-lg font-bold text-ink">{p.name}</h3>
-                <div className="mt-3 flex items-end gap-1">
-                  <span className="text-4xl font-extrabold text-ink">R{p.price}</span>
-                  <span className="mb-1 text-sm text-ink-secondary">/mo</span>
+                <p className="text-xs font-semibold uppercase tracking-widest text-ink-secondary">{p.name}</p>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-4xl font-extrabold tracking-tight text-ink">R{p.price}</span>
+                  <span className="text-sm text-ink-secondary">/mo</span>
                 </div>
-                <p className="mt-1 text-xs text-ink-secondary">{p.messages} messages/month</p>
-                <ul className="mt-6 flex-1 space-y-2">
+                <p className="mt-1 text-xs font-medium text-primary">{p.messages} messages / month</p>
+
+                <ul className="mt-7 flex-1 space-y-3">
                   {p.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-ink">
-                      <span className="mt-0.5 text-primary">✓</span>{f}
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-ink">
+                      <span className="mt-0.5 flex-shrink-0 text-primary font-bold">✓</span>
+                      {f}
                     </li>
                   ))}
                 </ul>
+
                 <a href={p.href}
-                  className={`mt-8 block rounded-xl px-4 py-3 text-center text-sm font-semibold transition ${
+                  className={`mt-8 block rounded-full px-4 py-3 text-center text-sm font-semibold transition ${
                     p.popular
-                      ? 'bg-primary text-white hover:bg-[#4e7d6d]'
+                      ? 'bg-primary text-white shadow-sm hover:bg-[#4e7d6d]'
                       : 'border border-border text-ink hover:bg-surface-2'
                   }`}>
                   {p.cta}
@@ -273,50 +354,76 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="border-t border-border bg-white px-6 py-12">
+      {/* ── CTA band ── */}
+      <section className="bg-primary px-6 py-20">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="text-3xl font-extrabold tracking-tight text-white md:text-4xl">
+            Ready to run your business smarter?
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-base text-white/80">
+            Join hundreds of South African businesses already using Tlhiso. No credit card required.
+          </p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Link to="/register"
+              className="rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-sm transition hover:bg-surface-2">
+              Start free trial
+            </Link>
+            <a href="mailto:hello@tlhiso.com"
+              className="rounded-full border border-white/40 px-8 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10">
+              Talk to sales
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-border/60 bg-white px-6 py-16">
         <div className="mx-auto max-w-7xl">
-          <div className="grid gap-8 md:grid-cols-4">
-            <div className="col-span-2 md:col-span-1">
-              <span className="text-xl font-extrabold text-ink">Tlhiso</span>
-              <p className="mt-2 text-sm text-ink-secondary">Run your business. Smarter.</p>
-              <p className="mt-4 text-xs text-ink-secondary">
-                <a href="mailto:hello@tlhiso.com" className="hover:text-primary">Hello@tlhiso.com</a>
+          <div className="grid gap-10 md:grid-cols-4">
+            <div>
+              <span className="text-xl font-extrabold tracking-tight text-ink">Tlhiso</span>
+              <p className="mt-2 text-sm text-ink-secondary leading-relaxed">
+                Run your business. Smarter.<br />Built for South Africa.
               </p>
+              <a href="mailto:hello@tlhiso.com"
+                className="mt-4 inline-block text-sm font-medium text-primary transition hover:underline">
+                hello@tlhiso.com
+              </a>
             </div>
             <div>
-              <p className="label-caps mb-3 text-xs text-ink-secondary">Product</p>
-              <ul className="space-y-2 text-sm text-ink-secondary">
-                <li><a href="#features" className="hover:text-primary">Features</a></li>
-                <li><a href="#pricing" className="hover:text-primary">Pricing</a></li>
-                <li><Link to="/register" className="hover:text-primary">Get Started</Link></li>
+              <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-ink-secondary">Product</p>
+              <ul className="space-y-2.5 text-sm text-ink-secondary">
+                <li><a href="#features" className="transition hover:text-primary">Features</a></li>
+                <li><a href="#pricing" className="transition hover:text-primary">Pricing</a></li>
+                <li><Link to="/register" className="transition hover:text-primary">Get Started</Link></li>
               </ul>
             </div>
             <div>
-              <p className="label-caps mb-3 text-xs text-ink-secondary">Industries</p>
-              <ul className="space-y-2 text-sm text-ink-secondary">
+              <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-ink-secondary">Industries</p>
+              <ul className="space-y-2.5 text-sm text-ink-secondary">
                 {INDUSTRY_LIST.map((ind) => (
-                  <li key={ind.key}><Link to="/register" className="hover:text-primary">{ind.label}</Link></li>
+                  <li key={ind.key}>
+                    <Link to="/register" className="transition hover:text-primary">{ind.label}</Link>
+                  </li>
                 ))}
               </ul>
             </div>
             <div>
-              <p className="label-caps mb-3 text-xs text-ink-secondary">Legal</p>
-              <ul className="space-y-2 text-sm text-ink-secondary">
-                <li><Link to="/legal/terms" className="hover:text-primary">Terms of Service</Link></li>
-                <li><Link to="/legal/privacy" className="hover:text-primary">Privacy Policy</Link></li>
+              <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-ink-secondary">Legal</p>
+              <ul className="space-y-2.5 text-sm text-ink-secondary">
+                <li><Link to="/legal/terms" className="transition hover:text-primary">Terms of Service</Link></li>
+                <li><Link to="/legal/privacy" className="transition hover:text-primary">Privacy Policy</Link></li>
                 <li>
-                  <a href="https://github.com/adobeing" target="_blank" rel="noreferrer" className="hover:text-primary">
-                    GitHub
-                  </a>
+                  <a href="https://github.com/adobeing" target="_blank" rel="noreferrer"
+                    className="transition hover:text-primary">GitHub</a>
                 </li>
               </ul>
             </div>
           </div>
-          <div className="mt-10 border-t border-border pt-6 text-center">
-            <p className="text-xs text-ink-secondary">
-              © {new Date().getFullYear()} Tlhiso. All rights reserved.
-              &nbsp;·&nbsp;
+
+          <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-border/50 pt-8 text-xs text-ink-secondary/70 md:flex-row">
+            <p>© {new Date().getFullYear()} Tlhiso. All rights reserved.</p>
+            <p>
               Protected by reCAPTCHA —{' '}
               <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="hover:text-primary">Privacy</a>
               {' & '}
