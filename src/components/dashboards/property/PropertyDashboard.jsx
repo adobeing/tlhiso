@@ -7,18 +7,18 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import {
-  PlusCircle, Trash2, MapPin, Eye, Pencil, List, Zap, Landmark,
-  Percent as PercentIcon, TrendingUp, Download, X, Loader2, Wrench,
+  PlusCircle, Trash2, MapPin, Eye, Pencil, List, TrendingUp, Download, X, Loader2, Wrench,
   AlertTriangle, CheckCircle2, Clock, Bell, Users as UsersIcon, FileText, Upload,
+  MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon,
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
+import SettingsPage from '../../shared/SettingsPage'
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer'
 
 // ── Currency formatter ────────────────────────────────────────────────────────
@@ -200,201 +200,794 @@ function Overview() {
 }
 
 // ── Properties ────────────────────────────────────────────────────────────────
+const PROP_BLANK = {
+  name: '', reference: '', type: 'Residential', status: 'Active', description: '',
+  // Location
+  address: '', suburb: '', city: '', province: 'Gauteng', postalCode: '',
+  // Physical
+  units: '', erfNumber: '', erfSize: '', floorArea: '', yearBuilt: '', sectionalTitleNo: '',
+  // Financial
+  purchasePrice: '', marketValue: '', monthlyRates: '', levy: '', municipalAccount: '',
+  // Ownership
+  owner: '', ownershipType: 'Individual', titleDeedNo: '',
+}
+
+const SA_PROVINCES = [
+  'Gauteng','Western Cape','KwaZulu-Natal','Eastern Cape',
+  'Limpopo','Mpumalanga','North West','Free State','Northern Cape',
+]
+
+const PROP_STATUS_COLORS = {
+  Active:           'bg-green-100 text-green-700',
+  Vacant:           'bg-amber-100 text-amber-700',
+  'Under Renovation': 'bg-blue-100 text-blue-600',
+  'For Sale':       'bg-purple-100 text-purple-700',
+}
+
+function PropFormFields({ f, setF }) {
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  return (
+    <div className="space-y-5">
+      {/* Property details */}
+      <div>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-primary">Property Details</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><Field label="Property Name *" value={f.name} onChange={set('name')} placeholder="e.g. Sunridge Estate Block A" /></div>
+          <Field label="Reference / Code" value={f.reference} onChange={set('reference')} placeholder="e.g. PRO-001" />
+          <Field label="Type" select value={f.type} onChange={set('type')}>
+            {['Residential','Commercial','Industrial','Mixed Use','Student Accommodation','Short-Term Rental'].map(t=><option key={t}>{t}</option>)}
+          </Field>
+          <Field label="Status" select value={f.status} onChange={set('status')}>
+            {Object.keys(PROP_STATUS_COLORS).map(s=><option key={s}>{s}</option>)}
+          </Field>
+          <Field label="Number of Units" type="number" value={f.units} onChange={set('units')} />
+          <div className="col-span-2"><Field label="Description" textarea value={f.description} onChange={set('description')} /></div>
+        </div>
+      </div>
+      {/* Location */}
+      <div>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-primary">Location</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><Field label="Street Address *" value={f.address} onChange={set('address')} placeholder="e.g. 12 Main Street" /></div>
+          <Field label="Suburb" value={f.suburb} onChange={set('suburb')} />
+          <Field label="City" value={f.city} onChange={set('city')} />
+          <Field label="Province" select value={f.province} onChange={set('province')}>
+            {SA_PROVINCES.map(p=><option key={p}>{p}</option>)}
+          </Field>
+          <Field label="Postal Code" value={f.postalCode} onChange={set('postalCode')} maxLength={4} />
+        </div>
+      </div>
+      {/* Physical */}
+      <div>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-primary">Physical Details</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="ERF / Stand Number" value={f.erfNumber} onChange={set('erfNumber')} />
+          <Field label="ERF Size (m²)" type="number" value={f.erfSize} onChange={set('erfSize')} />
+          <Field label="Floor Area (m²)" type="number" value={f.floorArea} onChange={set('floorArea')} />
+          <Field label="Year Built" type="number" value={f.yearBuilt} onChange={set('yearBuilt')} placeholder="e.g. 1998" />
+          <div className="col-span-2"><Field label="Sectional Title Scheme No." value={f.sectionalTitleNo} onChange={set('sectionalTitleNo')} placeholder="If applicable" /></div>
+        </div>
+      </div>
+      {/* Financial */}
+      <div>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-primary">Financial</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Purchase Price (R)" type="number" value={f.purchasePrice} onChange={set('purchasePrice')} />
+          <Field label="Current Market Value (R)" type="number" value={f.marketValue} onChange={set('marketValue')} />
+          <Field label="Monthly Rates & Taxes (R)" type="number" value={f.monthlyRates} onChange={set('monthlyRates')} />
+          <Field label="Monthly Levy (R)" type="number" value={f.levy} onChange={set('levy')} />
+          <div className="col-span-2"><Field label="Municipal Account No." value={f.municipalAccount} onChange={set('municipalAccount')} /></div>
+        </div>
+      </div>
+      {/* Ownership */}
+      <div>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-primary">Ownership</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Owner Name" value={f.owner} onChange={set('owner')} />
+          <Field label="Ownership Type" select value={f.ownershipType} onChange={set('ownershipType')}>
+            {['Individual','Company','Trust','Close Corporation','Other'].map(o=><option key={o}>{o}</option>)}
+          </Field>
+          <div className="col-span-2"><Field label="Title Deed No." value={f.titleDeedNo} onChange={set('titleDeedNo')} /></div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Properties() {
   const { user } = useAuth()
   const uid = user?.uid
   const properties = useCollection(uid ? `users/${uid}/properties` : null)
+  const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', address: '', type: 'Residential', units: '', purchasePrice: '', owner: '' })
+  const [viewing, setViewing] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(PROP_BLANK)
+  const [editForm, setEditForm] = useState(PROP_BLANK)
+  const [saving, setSaving] = useState(false)
 
   async function save() {
-    if (!uid || !form.name) return
-    await addDoc(collection(db, 'users', uid, 'properties'), { ...form, createdAt: serverTimestamp() })
-    setOpen(false)
-    setForm({ name: '', address: '', type: 'Residential', units: '', purchasePrice: '', owner: '' })
+    if (!uid || !form.name) { alert('Property name is required.'); return }
+    setSaving(true)
+    try {
+      await addDoc(collection(db, 'users', uid, 'properties'), { ...form, createdAt: serverTimestamp() })
+      setOpen(false); setForm(PROP_BLANK)
+    } finally { setSaving(false) }
   }
 
-  const cols = [
-    { key: 'name', label: 'Property Name' },
-    { key: 'address', label: 'Address' },
-    { key: 'type', label: 'Type' },
-    { key: 'units', label: 'Units' },
-    { key: 'owner', label: 'Owner' },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this property? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'properties', r.id)) }}
-        className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-    )},
-  ]
+  async function saveEdit() {
+    if (!uid || !editForm.name || !editing) return
+    setSaving(true)
+    try {
+      await updateDoc(doc(db, 'users', uid, 'properties', editing.id), editForm)
+      setEditing(null)
+    } finally { setSaving(false) }
+  }
+
+  function openEdit(p) {
+    setEditing(p)
+    setEditForm({ ...PROP_BLANK, ...p })
+  }
+
+  const activeTenants = p => tenants.filter(t => t.propertyId === p.id && t.status === 'Active').length
+  const totalUnits = properties.reduce((s, p) => s + Number(p.units || 0), 0)
+  const totalActive = properties.filter(p => p.status === 'Active').length
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHead title="Properties" subtitle="Your building & property register"
         action={<AddButton onClick={() => setOpen(true)}>Add Property</AddButton>} />
-      <DataTable columns={cols} data={properties} emptyMessage="No properties yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Property">
-        <div className="space-y-4">
-          <Field label="Property Name *" value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} />
-          <Field label="Address" value={form.address} onChange={e => setForm(f=>({...f,address:e.target.value}))} />
-          <Field label="Type" select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))}>
-            {['Residential','Commercial','Industrial','Mixed Use'].map(t=><option key={t}>{t}</option>)}
-          </Field>
-          <Field label="Number of Units" type="number" value={form.units} onChange={e => setForm(f=>({...f,units:e.target.value}))} />
-          <Field label="Purchase Price (R)" type="number" value={form.purchasePrice} onChange={e => setForm(f=>({...f,purchasePrice:e.target.value}))} />
-          <Field label="Owner" value={form.owner} onChange={e => setForm(f=>({...f,owner:e.target.value}))} />
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Property</button>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Total Properties" value={properties.length} icon="🏘️" />
+        <StatCard label="Total Units" value={totalUnits} icon="🔑" color="blue" />
+        <StatCard label="Active" value={totalActive} icon="✅" color="purple" />
+        <StatCard label="Vacant / Other" value={properties.length - totalActive} icon="⏳" color="orange" trendTone={properties.length - totalActive > 0 ? 'down' : 'up'} />
+      </div>
+
+      {/* Property cards */}
+      {properties.length === 0 ? (
+        <EmptyState icon={MapPin} message="No properties yet. Click 'Add Property' to get started." />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {properties.map(p => {
+            const occupied = activeTenants(p)
+            const units = Number(p.units || 0)
+            const occupancyPct = units > 0 ? Math.round((occupied / units) * 100) : 0
+            return (
+              <div key={p.id} className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md">
+                {/* Card header */}
+                <div className="flex items-start justify-between gap-2 border-b border-border bg-gradient-to-br from-primary-light/60 to-surface-2 px-5 py-4">
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-ink">{p.name}</p>
+                    {p.reference && <p className="text-xs text-ink-secondary">{p.reference}</p>}
+                  </div>
+                  <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${PROP_STATUS_COLORS[p.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {p.status || 'Active'}
+                  </span>
+                </div>
+
+                {/* Card body */}
+                <div className="flex flex-1 flex-col gap-3 p-5">
+                  {/* Address */}
+                  <div className="flex items-start gap-2 text-sm text-ink-secondary">
+                    <MapPin size={13} className="mt-0.5 flex-shrink-0 text-primary" />
+                    <span>{[p.address, p.suburb, p.city].filter(Boolean).join(', ') || '—'}</span>
+                  </div>
+
+                  {/* Key info grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: 'Type', value: p.type },
+                      { label: 'Units', value: p.units || '—' },
+                      { label: 'Owner', value: p.owner || '—' },
+                      { label: 'ERF', value: p.erfNumber || '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="rounded-lg bg-surface-2 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
+                        <p className="mt-0.5 text-xs font-semibold text-ink truncate">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Market value */}
+                  {p.marketValue && (
+                    <div className="rounded-lg border border-primary/20 bg-primary-light/30 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">Market Value</p>
+                      <p className="text-sm font-bold text-primary">{fmt(p.marketValue)}</p>
+                    </div>
+                  )}
+
+                  {/* Occupancy bar */}
+                  {units > 0 && (
+                    <div>
+                      <div className="mb-1 flex justify-between text-[11px]">
+                        <span className="font-semibold text-ink-secondary">Occupancy</span>
+                        <span className="font-semibold text-ink">{occupied}/{units} units</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${occupancyPct}%` }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Card actions */}
+                <div className="flex items-center gap-1 border-t border-border px-4 py-2.5">
+                  <button onClick={() => setViewing(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+                    <Eye size={12} /> View
+                  </button>
+                  <button onClick={() => openEdit(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                    <Pencil size={12} /> Edit
+                  </button>
+                  <button onClick={() => { if (!window.confirm('Delete this property? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'properties', p.id)) }}
+                    className="rounded-lg p-1.5 text-red-400 hover:bg-red-50 transition">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
+      )}
+
+      {/* Add modal */}
+      <Modal open={open} onClose={() => setOpen(false)} title="New Property" size="xl">
+        <PropFormFields f={form} setF={setForm} />
+        <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          {saving ? 'Saving…' : 'Save Property'}
+        </button>
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit Property" size="xl">
+        <PropFormFields f={editForm} setF={setEditForm} />
+        <button onClick={saveEdit} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </Modal>
+
+      {/* View modal */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Property Details" size="lg">
+        {viewing && (
+          <div className="space-y-5 text-sm">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 rounded-xl bg-primary-light/40 px-4 py-4">
+              <div>
+                <p className="text-base font-bold text-ink">{viewing.name}</p>
+                {viewing.reference && <p className="text-xs text-ink-secondary mt-0.5">Ref: {viewing.reference}</p>}
+                <p className="mt-1 text-xs text-ink-secondary">{[viewing.address, viewing.suburb, viewing.city, viewing.province].filter(Boolean).join(', ')}</p>
+              </div>
+              <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${PROP_STATUS_COLORS[viewing.status] ?? 'bg-gray-100 text-gray-600'}`}>{viewing.status}</span>
+            </div>
+
+            {[
+              { title: 'Property Details', fields: [
+                { label: 'Type', value: viewing.type },
+                { label: 'Units', value: viewing.units },
+                { label: 'Floor Area', value: viewing.floorArea ? `${viewing.floorArea} m²` : null },
+                { label: 'ERF Size', value: viewing.erfSize ? `${viewing.erfSize} m²` : null },
+                { label: 'ERF Number', value: viewing.erfNumber },
+                { label: 'Year Built', value: viewing.yearBuilt },
+                { label: 'Sectional Title No.', value: viewing.sectionalTitleNo },
+              ]},
+              { title: 'Financial', fields: [
+                { label: 'Purchase Price', value: viewing.purchasePrice ? fmt(viewing.purchasePrice) : null },
+                { label: 'Market Value', value: viewing.marketValue ? fmt(viewing.marketValue) : null },
+                { label: 'Monthly Rates', value: viewing.monthlyRates ? fmt(viewing.monthlyRates) : null },
+                { label: 'Monthly Levy', value: viewing.levy ? fmt(viewing.levy) : null },
+                { label: 'Municipal Account', value: viewing.municipalAccount },
+              ]},
+              { title: 'Ownership', fields: [
+                { label: 'Owner', value: viewing.owner },
+                { label: 'Ownership Type', value: viewing.ownershipType },
+                { label: 'Title Deed No.', value: viewing.titleDeedNo },
+              ]},
+            ].map(section => {
+              const visible = section.fields.filter(f => f.value)
+              if (!visible.length) return null
+              return (
+                <div key={section.title}>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">{section.title}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {visible.map(({ label, value }) => (
+                      <div key={label} className="rounded-xl bg-surface-2 px-4 py-2.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
+                        <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+
+            {viewing.description && (
+              <div>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Description</p>
+                <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink leading-relaxed">{viewing.description}</p>
+              </div>
+            )}
+
+            <button onClick={() => { setViewing(null); openEdit(viewing) }}
+              className="w-full rounded-xl border border-primary px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary-light transition">
+              Edit this property
+            </button>
+          </div>
+        )}
       </Modal>
     </div>
   )
 }
 
+// ── Tenant PDF ────────────────────────────────────────────────────────────────
+function TenantProfilePDF({ t, businessName, generatedAt }) {
+  const fullName = `${t.firstName || ''} ${t.lastName || ''}`.trim()
+  const rows = (label, value) => value ? (
+    <View style={ps.row} key={label}>
+      <Text style={ps.label}>{label}</Text>
+      <Text style={ps.value}>{value}</Text>
+    </View>
+  ) : null
+
+  return (
+    <Document>
+      <Page size="A4" style={ps.page}>
+        <View style={ps.header}>
+          <View>
+            <Text style={ps.brand}>{businessName || 'Tlhiso Property'}</Text>
+            <Text style={ps.sub}>Tenant Profile</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={ps.sub}>Generated: {generatedAt}</Text>
+            <Text style={ps.sub}>Status: {t.status || 'Active'}</Text>
+          </View>
+        </View>
+
+        <Text style={ps.title}>{fullName}</Text>
+
+        <Text style={{ ...ps.sub, marginBottom: 6, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', color: '#5c9e8a' }}>Personal Details</Text>
+        {rows('Full Name', fullName)}
+        {rows('SA ID Number', t.idNumber)}
+        {rows('Phone', t.phone)}
+        {rows('Email', t.email)}
+        {rows('Current Address', t.currentAddress)}
+        {rows('Employment Status', t.employmentStatus)}
+        {rows('Employer', t.employer)}
+        {rows('Employer Phone', t.employerPhone)}
+
+        <Text style={{ ...ps.sub, marginTop: 14, marginBottom: 6, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', color: '#5c9e8a' }}>Lease Details</Text>
+        {rows('Property', t.property)}
+        {rows('Unit Number', t.unitNumber)}
+        {rows('Lease Type', t.leaseType)}
+        {rows('Lease Start', t.leaseStart)}
+        {rows('Lease End', t.leaseEnd)}
+        {rows('Occupants', t.occupants)}
+        {rows('Parking Bay', t.parkingBay)}
+        {rows('Pets Allowed', t.petsAllowed)}
+
+        <Text style={{ ...ps.sub, marginTop: 14, marginBottom: 6, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', color: '#5c9e8a' }}>Financial</Text>
+        {rows('Monthly Rent', t.rentAmount ? `R ${Number(t.rentAmount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}` : null)}
+        {rows('Deposit Paid', t.depositPaid ? `R ${Number(t.depositPaid).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}` : null)}
+        {rows('Payment Method', t.paymentMethod)}
+        {rows('Escalation Rate', t.escalationRate ? `${t.escalationRate}% per annum` : null)}
+        {rows('Escalation Month', t.escalationMonth ? `Month ${t.escalationMonth}` : null)}
+
+        {(t.emergencyName || t.emergencyPhone) && (
+          <>
+            <Text style={{ ...ps.sub, marginTop: 14, marginBottom: 6, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', color: '#5c9e8a' }}>Emergency Contact</Text>
+            {rows('Name', t.emergencyName)}
+            {rows('Relationship', t.emergencyRelation)}
+            {rows('Phone', t.emergencyPhone)}
+          </>
+        )}
+
+        {t.notes && (
+          <>
+            <Text style={{ ...ps.sub, marginTop: 14, marginBottom: 6, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', color: '#5c9e8a' }}>Notes</Text>
+            <Text style={{ fontSize: 9, color: '#333', lineHeight: 1.5 }}>{t.notes}</Text>
+          </>
+        )}
+
+        <View style={ps.footer}>
+          <Text>{businessName || 'Tlhiso Property'} · Confidential tenant record</Text>
+          <Text>Generated via Tlhiso</Text>
+        </View>
+      </Page>
+    </Document>
+  )
+}
+
+async function downloadTenantPDF(t, businessName) {
+  const blob = await pdf(<TenantProfilePDF t={t} businessName={businessName} generatedAt={new Date().toLocaleDateString('en-ZA')} />).toBlob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `Tenant_${t.firstName}_${t.lastName}_Profile.pdf`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Tenants ───────────────────────────────────────────────────────────────────
+const TENANT_BLANK = {
+  firstName: '', lastName: '', idNumber: '', phone: '', email: '', currentAddress: '',
+  employmentStatus: 'Employed', employer: '', employerPhone: '',
+  emergencyName: '', emergencyRelation: '', emergencyPhone: '',
+  propertyId: '', unitNumber: '', leaseType: 'Fixed Term', leaseStart: '', leaseEnd: '',
+  rentAmount: '', depositPaid: '', paymentMethod: 'EFT',
+  escalationRate: '10', escalationMonth: '',
+  occupants: '1', parkingBay: '', petsAllowed: 'No',
+  status: 'Active', notes: '',
+}
+
+const STATUS_COLORS = {
+  Active: 'bg-green-100 text-green-700',
+  'Notice Given': 'bg-amber-100 text-amber-700',
+  Vacated: 'bg-gray-100 text-gray-500',
+}
+
+function leaseInfo(t) {
+  if (!t.leaseEnd) return null
+  const today = new Date()
+  const end = new Date(t.leaseEnd)
+  const days = Math.floor((end - today) / 86400000)
+  if (days < 0) return { label: 'Expired', color: 'bg-red-100 text-red-600', urgent: true }
+  if (days <= 30) return { label: `${days}d left`, color: 'bg-red-100 text-red-600', urgent: true }
+  if (days <= 60) return { label: `${days}d left`, color: 'bg-amber-100 text-amber-600', urgent: false }
+  return { label: `${days}d left`, color: 'bg-green-100 text-green-700', urgent: false }
+}
+
+function TenantFormFields({ f, setF, properties, docFile, setDocFile }) {
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  const SecHead = ({ label }) => (
+    <div className="col-span-2 mt-2 flex items-center gap-3">
+      <span className="text-[11px] font-bold uppercase tracking-wider text-primary">{label}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  )
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <SecHead label="Personal Details" />
+      <Field label="First Name *" value={f.firstName} onChange={set('firstName')} />
+      <Field label="Last Name *" value={f.lastName} onChange={set('lastName')} />
+      <Field label="SA ID Number (13 digits)" value={f.idNumber} onChange={set('idNumber')} maxLength={13} />
+      <Field label="Phone (+27…)" value={f.phone} onChange={set('phone')} />
+      <Field label="Email" type="email" value={f.email} onChange={set('email')} />
+      <Field label="Employment Status" select value={f.employmentStatus} onChange={set('employmentStatus')}>
+        {['Employed','Self-Employed','Unemployed','Student','Retired','Other'].map(s=><option key={s}>{s}</option>)}
+      </Field>
+      <Field label="Employer / Company" value={f.employer} onChange={set('employer')} />
+      <Field label="Employer Phone" value={f.employerPhone} onChange={set('employerPhone')} />
+      <div className="col-span-2"><Field label="Current / Previous Address" textarea value={f.currentAddress} onChange={set('currentAddress')} /></div>
+
+      <SecHead label="Emergency Contact" />
+      <Field label="Contact Name" value={f.emergencyName} onChange={set('emergencyName')} />
+      <Field label="Relationship" value={f.emergencyRelation} onChange={set('emergencyRelation')} placeholder="e.g. Spouse, Parent" />
+      <div className="col-span-2"><Field label="Contact Phone" value={f.emergencyPhone} onChange={set('emergencyPhone')} /></div>
+
+      <SecHead label="Lease Details" />
+      <Field label="Property *" select value={f.propertyId} onChange={set('propertyId')}>
+        <option value="">Select property…</option>
+        {properties.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+      </Field>
+      <Field label="Unit Number" value={f.unitNumber} onChange={set('unitNumber')} />
+      <Field label="Lease Type" select value={f.leaseType} onChange={set('leaseType')}>
+        {['Fixed Term','Month-to-Month','Periodic','Short-Term'].map(t=><option key={t}>{t}</option>)}
+      </Field>
+      <Field label="Status" select value={f.status} onChange={set('status')}>
+        {['Active','Notice Given','Vacated'].map(s=><option key={s}>{s}</option>)}
+      </Field>
+      <Field label="Lease Start" type="date" value={f.leaseStart} onChange={set('leaseStart')} />
+      <Field label="Lease End" type="date" value={f.leaseEnd} onChange={set('leaseEnd')} />
+      <Field label="Number of Occupants" type="number" min="1" value={f.occupants} onChange={set('occupants')} />
+      <Field label="Parking Bay" value={f.parkingBay} onChange={set('parkingBay')} placeholder="e.g. Bay 12 or N/A" />
+      <Field label="Pets Allowed" select value={f.petsAllowed} onChange={set('petsAllowed')}>
+        {['No','Yes — small pets','Yes — all pets'].map(p=><option key={p}>{p}</option>)}
+      </Field>
+
+      <SecHead label="Financial" />
+      <Field label="Monthly Rent (R) *" type="number" value={f.rentAmount} onChange={set('rentAmount')} />
+      <Field label="Deposit Paid (R)" type="number" value={f.depositPaid} onChange={set('depositPaid')} />
+      <Field label="Payment Method" select value={f.paymentMethod} onChange={set('paymentMethod')}>
+        {['EFT','Cash','Debit Order','Stop Order'].map(m=><option key={m}>{m}</option>)}
+      </Field>
+      <Field label="Annual Escalation (%)" type="number" value={f.escalationRate} onChange={set('escalationRate')} />
+      <Field label="Escalation Month (1–12)" type="number" min="1" max="12" value={f.escalationMonth} onChange={set('escalationMonth')} placeholder="e.g. 3 for March" />
+
+      <SecHead label="Documents & Notes" />
+      <div className="col-span-2">
+        <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">Upload Document (Lease agreement, ID copy, etc.)</span>
+        <input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} className="text-sm text-ink-secondary" />
+      </div>
+      <div className="col-span-2"><Field label="Notes / Remarks" textarea value={f.notes} onChange={set('notes')} /></div>
+    </div>
+  )
+}
+
 function Tenants() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const uid = user?.uid
   const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
   const properties = useCollection(uid ? `users/${uid}/properties` : null)
-  const [open, setOpen] = useState(false)
-  const [docFile, setDocFile] = useState(null)
-  const [form, setForm] = useState({
-    firstName: '', lastName: '', idNumber: '', phone: '', email: '',
-    propertyId: '', unitNumber: '', leaseStart: '', leaseEnd: '',
-    rentAmount: '', depositPaid: '', status: 'Active',
-    escalationRate: '10', escalationMonth: '',
-  })
+
+  const [open,    setOpen]    = useState(false)
   const [viewing, setViewing] = useState(null)
   const [editing, setEditing] = useState(null)
-  const [editForm, setEditForm] = useState({
-    firstName: '', lastName: '', idNumber: '', phone: '', email: '',
-    propertyId: '', unitNumber: '', leaseStart: '', leaseEnd: '',
-    rentAmount: '', depositPaid: '', status: 'Active',
-    escalationRate: '10', escalationMonth: '',
-  })
+  const [form,    setForm]    = useState(TENANT_BLANK)
+  const [editForm,setEditForm]= useState(TENANT_BLANK)
+  const [docFile, setDocFile] = useState(null)
+  const [saving,  setSaving]  = useState(false)
+  const [sending, setSending] = useState(null)
+  const [pdfing,  setPdfing]  = useState(false)
 
   async function save() {
-    if (!uid || !form.firstName) return
-    let docUrl = ''
-    if (docFile) {
-      const storageRef = ref(storage, `users/${uid}/tenants/${Date.now()}_${docFile.name}`)
-      await uploadBytes(storageRef, docFile)
-      docUrl = await getDownloadURL(storageRef)
-    }
-    const prop = properties.find(p => p.id === form.propertyId)
-    await addDoc(collection(db, 'users', uid, 'tenants'), {
-      ...form, property: prop?.name ?? '', documentUrl: docUrl, createdAt: serverTimestamp(),
-    })
-    setOpen(false)
-    setForm({ firstName: '', lastName: '', idNumber: '', phone: '', email: '', propertyId: '', unitNumber: '', leaseStart: '', leaseEnd: '', rentAmount: '', depositPaid: '', status: 'Active', escalationRate: '10', escalationMonth: '' })
+    if (!uid || !form.firstName || !form.lastName) { alert('First and last name are required.'); return }
+    setSaving(true)
+    try {
+      let docUrl = ''
+      if (docFile) {
+        const storageRef = ref(storage, `users/${uid}/tenants/${Date.now()}_${docFile.name}`)
+        await uploadBytes(storageRef, docFile)
+        docUrl = await getDownloadURL(storageRef)
+      }
+      const prop = properties.find(p => p.id === form.propertyId)
+      await addDoc(collection(db, 'users', uid, 'tenants'), {
+        ...form, property: prop?.name ?? '', documentUrl: docUrl, createdAt: serverTimestamp(),
+      })
+      setOpen(false); setForm(TENANT_BLANK); setDocFile(null)
+    } finally { setSaving(false) }
   }
 
   async function saveEdit() {
     if (!uid || !editForm.firstName || !editing) return
-    const prop = properties.find(p => p.id === editForm.propertyId)
-    await updateDoc(doc(db, 'users', uid, 'tenants', editing.id), {
-      ...editForm, property: prop?.name ?? editing.property ?? '',
-    })
-    setEditing(null)
+    setSaving(true)
+    try {
+      const prop = properties.find(p => p.id === editForm.propertyId)
+      await updateDoc(doc(db, 'users', uid, 'tenants', editing.id), {
+        ...editForm, property: prop?.name ?? editing.property ?? '',
+      })
+      setEditing(null)
+    } finally { setSaving(false) }
   }
 
-  const statusColor = s => ({ Active: 'bg-green-100 text-green-700', 'Notice Given': 'bg-amber-100 text-amber-700', Vacated: 'bg-gray-100 text-gray-600' }[s] ?? '')
+  function openEdit(t) {
+    setEditing(t)
+    setEditForm({ ...TENANT_BLANK, ...t })
+  }
+
+  async function sendSMS(t) {
+    if (!t.phone) { alert('No phone number on file.'); return }
+    setSending(t.id)
+    try {
+      const fn = httpsCallable(functions, 'sendSMS')
+      const msg = `Hi ${t.firstName}, this is a message from your property manager. Please contact us if you have any queries.`
+      await fn({ to: t.phone, message: msg })
+      await addDoc(collection(db, 'users', uid, 'messages'), {
+        to: t.phone, type: 'sms', body: msg, module: 'tenant-direct', status: 'sent', sentAt: serverTimestamp(),
+      })
+    } catch { alert('SMS failed — check BulkSMS credentials.') } finally { setSending(null) }
+  }
+
+  async function handleDownloadPDF(t) {
+    setPdfing(t.id)
+    try {
+      await downloadTenantPDF(t, profile?.businessName || profile?.name || 'Tlhiso Property')
+    } catch { alert('PDF generation failed.') } finally { setPdfing(null) }
+  }
+
+  // Stats
+  const active     = tenants.filter(t => t.status === 'Active').length
+  const onNotice   = tenants.filter(t => t.status === 'Notice Given').length
+  const vacated    = tenants.filter(t => t.status === 'Vacated').length
+  const totalRent  = tenants.filter(t => t.status === 'Active').reduce((s, t) => s + Number(t.rentAmount || 0), 0)
+  const expiringSoon = tenants.filter(t => { const info = leaseInfo(t); return info?.urgent }).length
 
   const cols = [
-    { key: 'firstName', label: 'First Name' },
-    { key: 'lastName', label: 'Last Name' },
-    { key: 'property', label: 'Property' },
-    { key: 'unitNumber', label: 'Unit' },
-    { key: 'rentAmount', label: 'Rent', render: r => fmt(r.rentAmount) },
-    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status}</span> },
+    { key: 'firstName', label: 'Tenant', render: r => (
+      <div>
+        <p className="font-semibold text-ink">{r.firstName} {r.lastName}</p>
+        <p className="text-xs text-ink-secondary">{r.idNumber || '—'}</p>
+      </div>
+    )},
+    { key: 'property', label: 'Property / Unit', render: r => (
+      <div>
+        <p className="text-sm text-ink">{r.property || '—'}</p>
+        {r.unitNumber && <p className="text-xs text-ink-secondary">Unit {r.unitNumber}</p>}
+      </div>
+    )},
+    { key: 'rentAmount', label: 'Rent', render: r => (
+      <div>
+        <p className="font-semibold text-ink">{fmt(r.rentAmount)}</p>
+        <p className="text-xs text-ink-secondary">{r.paymentMethod || 'EFT'}</p>
+      </div>
+    )},
+    { key: 'leaseEnd', label: 'Lease Expiry', render: r => {
+      const info = leaseInfo(r)
+      return (
+        <div>
+          <p className="text-sm text-ink">{r.leaseEnd || '—'}</p>
+          {info && <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${info.color}`}>{info.label}</span>}
+        </div>
+      )
+    }},
+    { key: 'status', label: 'Status', render: r => (
+      <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-500'}`}>{r.status}</span>
+    )},
     { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex items-center gap-1">
-        <button onClick={e => { e.stopPropagation(); setViewing(r) }}
-          title="View" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
-        <button onClick={e => { e.stopPropagation(); setEditing(r); setEditForm({ firstName: r.firstName||'', lastName: r.lastName||'', idNumber: r.idNumber||'', phone: r.phone||'', email: r.email||'', propertyId: r.propertyId||'', unitNumber: r.unitNumber||'', leaseStart: r.leaseStart||'', leaseEnd: r.leaseEnd||'', rentAmount: r.rentAmount||'', depositPaid: r.depositPaid||'', status: r.status||'Active', escalationRate: r.escalationRate||'10', escalationMonth: r.escalationMonth||'' }) }}
-          title="Edit" className="rounded p-1 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
-        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this tenant? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'tenants', r.id)) }}
-          title="Delete" className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <button onClick={() => setViewing(r)} title="View" className="rounded p-1.5 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
+        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1.5 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
+        <button onClick={() => handleDownloadPDF(r)} title="Download PDF" disabled={pdfing === r.id}
+          className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 disabled:opacity-40">
+          {pdfing === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        </button>
+        <button onClick={() => { if (!window.confirm('Delete this tenant? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'tenants', r.id)) }}
+          title="Delete" className="rounded p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
       </div>
     )},
   ]
 
-  const tenantFormFields = (f, setF) => (
-    <div className="grid grid-cols-2 gap-4">
-      <Field label="First Name *" value={f.firstName} onChange={e => setF(x=>({...x,firstName:e.target.value}))} />
-      <Field label="Last Name *" value={f.lastName} onChange={e => setF(x=>({...x,lastName:e.target.value}))} />
-      <Field label="SA ID Number" value={f.idNumber} onChange={e => setF(x=>({...x,idNumber:e.target.value}))} />
-      <Field label="Phone" value={f.phone} onChange={e => setF(x=>({...x,phone:e.target.value}))} />
-      <Field label="Email" type="email" value={f.email} onChange={e => setF(x=>({...x,email:e.target.value}))} />
-      <Field label="Property" select value={f.propertyId} onChange={e => setF(x=>({...x,propertyId:e.target.value}))}>
-        <option value="">Select…</option>
-        {properties.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-      </Field>
-      <Field label="Unit Number" value={f.unitNumber} onChange={e => setF(x=>({...x,unitNumber:e.target.value}))} />
-      <Field label="Rent Amount (R)" type="number" value={f.rentAmount} onChange={e => setF(x=>({...x,rentAmount:e.target.value}))} />
-      <Field label="Lease Start" type="date" value={f.leaseStart} onChange={e => setF(x=>({...x,leaseStart:e.target.value}))} />
-      <Field label="Lease End" type="date" value={f.leaseEnd} onChange={e => setF(x=>({...x,leaseEnd:e.target.value}))} />
-      <Field label="Deposit Paid (R)" type="number" value={f.depositPaid} onChange={e => setF(x=>({...x,depositPaid:e.target.value}))} />
-      <Field label="Status" select value={f.status} onChange={e => setF(x=>({...x,status:e.target.value}))}>
-        {['Active','Notice Given','Vacated'].map(s=><option key={s}>{s}</option>)}
-      </Field>
-      <Field label="Annual Escalation (%)" type="number" value={f.escalationRate} onChange={e => setF(x=>({...x,escalationRate:e.target.value}))} />
-      <Field label="Escalation Month (1-12)" type="number" min="1" max="12" placeholder="e.g. 3 for March" value={f.escalationMonth} onChange={e => setF(x=>({...x,escalationMonth:e.target.value}))} />
-    </div>
-  )
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHead title="Tenants" subtitle="Lease holders, escalation & documents"
-        action={<AddButton onClick={() => setOpen(true)}>Add Tenant</AddButton>} />
-      <DataTable columns={cols} data={tenants} emptyMessage="No tenants yet." />
+        action={<AddButton onClick={() => { setForm(TENANT_BLANK); setDocFile(null); setOpen(true) }}>Add Tenant</AddButton>} />
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <StatCard label="Active Tenants"  value={active}      icon="👥" color="blue" />
+        <StatCard label="On Notice"       value={onNotice}    icon="⚠️" color="orange" trendTone={onNotice ? 'down' : 'up'} />
+        <StatCard label="Vacated"         value={vacated}     icon="🚪" trendTone="flat" />
+        <StatCard label="Expiring Soon"   value={expiringSoon} icon="📅" color="orange" trendTone={expiringSoon ? 'down' : 'up'} />
+        <StatCard label="Monthly Rent Roll" value={fmt(totalRent)} icon="💰" color="purple" />
+      </div>
+
+      <DataTable columns={cols} data={tenants} emptyMessage="No tenants yet." onRowClick={setViewing} />
 
       {/* Add modal */}
-      <Modal open={open} onClose={() => setOpen(false)} title="New Tenant" size="lg">
-        {tenantFormFields(form, setForm)}
-        <div className="col-span-2 mt-3">
-          <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">Upload Document (Lease, ID, etc.)</span>
-          <input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} className="text-sm text-ink-secondary" />
-        </div>
-        <button onClick={save} className="mt-4 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Tenant</button>
-      </Modal>
-
-      {/* View modal */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Tenant Details">
-        {viewing && (
-          <div className="space-y-3 text-sm">
-            {[
-              { label: 'Full Name', value: `${viewing.firstName||''} ${viewing.lastName||''}`.trim() },
-              { label: 'SA ID Number', value: viewing.idNumber },
-              { label: 'Phone', value: viewing.phone },
-              { label: 'Email', value: viewing.email },
-              { label: 'Property', value: viewing.property },
-              { label: 'Unit Number', value: viewing.unitNumber },
-              { label: 'Rent Amount', value: viewing.rentAmount ? fmt(viewing.rentAmount) : null },
-              { label: 'Deposit Paid', value: viewing.depositPaid ? fmt(viewing.depositPaid) : null },
-              { label: 'Lease Start', value: viewing.leaseStart },
-              { label: 'Lease End', value: viewing.leaseEnd },
-              { label: 'Status', value: viewing.status },
-              { label: 'Escalation Rate', value: viewing.escalationRate ? `${viewing.escalationRate}% per annum` : null },
-              { label: 'Escalation Month', value: viewing.escalationMonth ? `Month ${viewing.escalationMonth}` : null },
-            ].map(({ label, value }) => value ? (
-              <div key={label} className="flex flex-col gap-0.5 rounded-xl bg-surface-2 px-4 py-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</span>
-                <span className="text-sm text-ink">{value}</span>
-              </div>
-            ) : null)}
-            {viewing.documentUrl && (
-              <a href={viewing.documentUrl} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary-light px-3 py-2 text-xs font-semibold text-primary hover:bg-primary hover:text-white transition">
-                View Uploaded Document →
-              </a>
-            )}
-          </div>
-        )}
+      <Modal open={open} onClose={() => setOpen(false)} title="New Tenant" size="xl">
+        <TenantFormFields f={form} setF={setForm} properties={properties} docFile={docFile} setDocFile={setDocFile} />
+        <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          {saving ? 'Saving…' : 'Save Tenant'}
+        </button>
       </Modal>
 
       {/* Edit modal */}
-      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit Tenant" size="lg">
-        {tenantFormFields(editForm, setEditForm)}
-        <button onClick={saveEdit} className="mt-4 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Changes</button>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit Tenant" size="xl">
+        <TenantFormFields f={editForm} setF={setEditForm} properties={properties} docFile={docFile} setDocFile={setDocFile} />
+        <button onClick={saveEdit} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </Modal>
+
+      {/* View modal */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Tenant Profile" size="lg">
+        {viewing && (() => {
+          const info = leaseInfo(viewing)
+          const leaseStart = viewing.leaseStart ? new Date(viewing.leaseStart) : null
+          const leaseEnd   = viewing.leaseEnd   ? new Date(viewing.leaseEnd)   : null
+          const leaseDuration = leaseStart && leaseEnd ? Math.floor((leaseEnd - leaseStart) / 86400000) : 0
+          const leaseElapsed  = leaseStart ? Math.floor((new Date() - leaseStart) / 86400000) : 0
+          const leasePct = leaseDuration > 0 ? Math.min(Math.max((leaseElapsed / leaseDuration) * 100, 0), 100) : 0
+
+          return (
+            <div className="space-y-5 text-sm">
+              {/* Identity header */}
+              <div className="flex items-start justify-between gap-4 rounded-2xl bg-gradient-to-br from-primary-light/50 to-surface-2 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-lg font-bold text-white">
+                    {(viewing.firstName || '?').charAt(0)}{(viewing.lastName || '').charAt(0)}
+                  </div>
+                  <div>
+                    <p className="text-base font-bold text-ink">{viewing.firstName} {viewing.lastName}</p>
+                    {viewing.idNumber && <p className="text-xs text-ink-secondary">ID: {viewing.idNumber}</p>}
+                    <p className="text-xs text-ink-secondary mt-0.5">{viewing.property}{viewing.unitNumber ? ` · Unit ${viewing.unitNumber}` : ''}</p>
+                  </div>
+                </div>
+                <span className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[viewing.status] ?? 'bg-gray-100 text-gray-500'}`}>{viewing.status}</span>
+              </div>
+
+              {/* Lease progress bar */}
+              {leaseStart && leaseEnd && (
+                <div className="rounded-xl border border-border bg-white px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-ink">Lease Progress</span>
+                    {info && <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${info.color}`}>{info.label}</span>}
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+                    <div className={`h-full rounded-full transition-all ${leasePct > 90 ? 'bg-red-500' : leasePct > 70 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${leasePct}%` }} />
+                  </div>
+                  <div className="mt-1.5 flex justify-between text-[10px] text-ink-secondary">
+                    <span>{viewing.leaseStart}</span>
+                    <span>{viewing.leaseEnd}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Detail sections */}
+              {[
+                { title: 'Contact', fields: [
+                  { label: 'Phone', value: viewing.phone },
+                  { label: 'Email', value: viewing.email },
+                  { label: 'Employment', value: viewing.employmentStatus },
+                  { label: 'Employer', value: viewing.employer },
+                  { label: 'Employer Phone', value: viewing.employerPhone },
+                ]},
+                { title: 'Lease', fields: [
+                  { label: 'Lease Type', value: viewing.leaseType },
+                  { label: 'Occupants', value: viewing.occupants },
+                  { label: 'Parking Bay', value: viewing.parkingBay },
+                  { label: 'Pets', value: viewing.petsAllowed },
+                ]},
+                { title: 'Financial', fields: [
+                  { label: 'Monthly Rent', value: fmt(viewing.rentAmount) },
+                  { label: 'Deposit Paid', value: viewing.depositPaid ? fmt(viewing.depositPaid) : null },
+                  { label: 'Payment Method', value: viewing.paymentMethod },
+                  { label: 'Escalation', value: viewing.escalationRate ? `${viewing.escalationRate}% · Month ${viewing.escalationMonth || '—'}` : null },
+                ]},
+                { title: 'Emergency Contact', fields: [
+                  { label: 'Name', value: viewing.emergencyName },
+                  { label: 'Relationship', value: viewing.emergencyRelation },
+                  { label: 'Phone', value: viewing.emergencyPhone },
+                ]},
+              ].map(section => {
+                const visible = section.fields.filter(f => f.value)
+                if (!visible.length) return null
+                return (
+                  <div key={section.title}>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">{section.title}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {visible.map(({ label, value }) => (
+                        <div key={label} className="rounded-xl bg-surface-2 px-3 py-2.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
+                          <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {viewing.currentAddress && (
+                <div>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Previous Address</p>
+                  <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-sm text-ink">{viewing.currentAddress}</p>
+                </div>
+              )}
+
+              {viewing.notes && (
+                <div>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Notes</p>
+                  <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-sm leading-relaxed text-ink">{viewing.notes}</p>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button onClick={() => handleDownloadPDF(viewing)} disabled={pdfing === viewing.id}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                  {pdfing === viewing.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Download PDF
+                </button>
+                <button onClick={() => sendSMS(viewing)} disabled={sending === viewing.id}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                  {sending === viewing.id ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
+                  Send SMS
+                </button>
+                <button onClick={() => { setViewing(null); openEdit(viewing) }}
+                  className="col-span-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d] transition">
+                  Edit Tenant
+                </button>
+              </div>
+
+              {viewing.documentUrl && (
+                <a href={viewing.documentUrl} target="_blank" rel="noreferrer"
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-primary-light py-2.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                  <FileText size={13} /> View Uploaded Document
+                </a>
+              )}
+            </div>
+          )
+        })()}
       </Modal>
     </div>
   )
@@ -608,197 +1201,6 @@ function RentRoll() {
   )
 }
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
-function Utilities() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
-  const bills = useCollection(uid ? `users/${uid}/utilityBills` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({
-    tenantId: '', billingMonth: new Date().toISOString().slice(0, 7),
-    electricity: '', electricityRate: '2.50', water: '', levy: '', other: '', description: '', status: 'Unpaid',
-  })
-
-  const electricityTotal = Number(form.electricity || 0) * Number(form.electricityRate || 0)
-  const billTotal = electricityTotal + Number(form.water || 0) + Number(form.levy || 0) + Number(form.other || 0)
-
-  async function save() {
-    if (!uid || !form.tenantId) return
-    const tenant = tenants.find(t => t.id === form.tenantId)
-    await addDoc(collection(db, 'users', uid, 'utilityBills'), {
-      ...form,
-      tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : '',
-      property: tenant?.property ?? '',
-      unit: tenant?.unitNumber ?? '',
-      electricityTotal,
-      total: billTotal,
-      createdAt: serverTimestamp(),
-    })
-    setOpen(false)
-    setForm({ tenantId: '', billingMonth: new Date().toISOString().slice(0, 7), electricity: '', electricityRate: '2.50', water: '', levy: '', other: '', description: '', status: 'Unpaid' })
-  }
-
-  const cols = [
-    { key: 'tenantName', label: 'Tenant' },
-    { key: 'property', label: 'Property' },
-    { key: 'unit', label: 'Unit' },
-    { key: 'billingMonth', label: 'Month' },
-    { key: 'electricityTotal', label: 'Electricity', render: r => r.electricityTotal ? fmt(r.electricityTotal) : '—' },
-    { key: 'water', label: 'Water', render: r => r.water ? fmt(r.water) : '—' },
-    { key: 'levy', label: 'Levy', render: r => r.levy ? fmt(r.levy) : '—' },
-    { key: 'total', label: 'Total', render: r => <span className="font-semibold">{fmt(r.total)}</span> },
-    { key: 'status', label: 'Status', render: r => (
-      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
-    )},
-    { key: 'actions', label: '', sortable: false, render: r => r.status !== 'Paid' && (
-      <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'utilityBills', r.id), { status: 'Paid' }) }}
-        className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Mark Paid</button>
-    )},
-  ]
-
-  return (
-    <div className="space-y-4">
-      <PageHead title="Utilities" subtitle="Electricity, water & levy recovery per unit"
-        action={<AddButton onClick={() => setOpen(true)}>Add Bill</AddButton>} />
-      <DataTable columns={cols} data={bills} emptyMessage="No utility bills yet." />
-
-      <Modal open={open} onClose={() => setOpen(false)} title="New Utility Bill" size="lg">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Tenant *" select value={form.tenantId} onChange={e => setForm(f=>({...f,tenantId:e.target.value}))}>
-              <option value="">Select tenant…</option>
-              {tenants.filter(t=>t.status==='Active').map(t=><option key={t.id} value={t.id}>{t.firstName} {t.lastName} — {t.property} {t.unitNumber}</option>)}
-            </Field>
-            <Field label="Billing Month" type="month" value={form.billingMonth} onChange={e => setForm(f=>({...f,billingMonth:e.target.value}))} />
-            <Field label="Electricity (kWh)" type="number" value={form.electricity} onChange={e => setForm(f=>({...f,electricity:e.target.value}))} />
-            <Field label="Rate per kWh (R)" type="number" value={form.electricityRate} onChange={e => setForm(f=>({...f,electricityRate:e.target.value}))} />
-            <Field label="Water (R)" type="number" value={form.water} onChange={e => setForm(f=>({...f,water:e.target.value}))} />
-            <Field label="Levy (R)" type="number" value={form.levy} onChange={e => setForm(f=>({...f,levy:e.target.value}))} />
-            <Field label="Other (R)" type="number" value={form.other} onChange={e => setForm(f=>({...f,other:e.target.value}))} />
-            <Field label="Status" select value={form.status} onChange={e => setForm(f=>({...f,status:e.target.value}))}>
-              {['Unpaid','Paid'].map(s=><option key={s}>{s}</option>)}
-            </Field>
-          </div>
-          <Field label="Notes" textarea value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
-          <div className="rounded-xl bg-primary-light px-4 py-3">
-            <p className="text-xs text-ink-secondary">Electricity total: {fmt(electricityTotal)}</p>
-            <p className="mt-1 text-sm font-bold text-ink">Bill Total: {fmt(billTotal)}</p>
-          </div>
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Bill</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
-
-// ── Trust Account ─────────────────────────────────────────────────────────────
-function TrustAccount() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const ledger = useCollection(uid ? `users/${uid}/trustLedger` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), type: 'Trust Receipt', description: '', amount: '', reference: '' })
-
-  const sorted = useMemo(() => [...ledger].sort((a,b) => (a.date||'') < (b.date||'') ? -1 : 1), [ledger])
-
-  // Running balances
-  const withBalance = useMemo(() => {
-    let trustBal = 0, bizBal = 0
-    return sorted.map(e => {
-      const amt = Number(e.amount ?? 0)
-      if (e.type === 'Trust Receipt') trustBal += amt
-      else if (e.type === 'Trust Disbursement') trustBal -= amt
-      else if (e.type === 'Business Receipt') bizBal += amt
-      else if (e.type === 'Business Disbursement') bizBal -= amt
-      return { ...e, trustBalance: trustBal, bizBalance: bizBal }
-    })
-  }, [sorted])
-
-  const trustBalance = withBalance.length ? withBalance[withBalance.length - 1].trustBalance : 0
-  const bizBalance = withBalance.length ? withBalance[withBalance.length - 1].bizBalance : 0
-
-  async function save() {
-    if (!uid || !form.description || !form.amount) return
-    await addDoc(collection(db, 'users', uid, 'trustLedger'), { ...form, createdAt: serverTimestamp() })
-    setOpen(false)
-    setForm({ date: new Date().toISOString().slice(0,10), type: 'Trust Receipt', description: '', amount: '', reference: '' })
-  }
-
-  const typeColor = t => ({
-    'Trust Receipt': 'text-green-600', 'Trust Disbursement': 'text-red-500',
-    'Business Receipt': 'text-blue-600', 'Business Disbursement': 'text-orange-500',
-  }[t] ?? 'text-ink')
-
-  const amtDisplay = e => {
-    const amt = Number(e.amount ?? 0)
-    const isDebit = e.type.includes('Disbursement')
-    return <span className={isDebit ? 'text-red-500' : 'text-green-600'}>{isDebit ? `(${fmt(amt)})` : fmt(amt)}</span>
-  }
-
-  return (
-    <div className="space-y-4">
-      <PageHead title="Trust Account" subtitle="Separate client funds (trust) from agency income (business)"
-        action={<AddButton onClick={() => setOpen(true)}>Add Entry</AddButton>} />
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-card border border-border bg-white shadow-card p-5">
-          <p className="text-xs font-semibold text-ink-secondary mb-1">TRUST BALANCE (Client Funds)</p>
-          <p className={`text-2xl font-bold ${trustBalance < 0 ? 'text-red-500' : 'text-green-600'}`}>{fmt(trustBalance)}</p>
-          <p className="text-xs text-ink-secondary mt-1">PPRA regulated — client money only</p>
-        </div>
-        <div className="rounded-card border border-border bg-white shadow-card p-5">
-          <p className="text-xs font-semibold text-ink-secondary mb-1">BUSINESS BALANCE (Agency Income)</p>
-          <p className={`text-2xl font-bold ${bizBalance < 0 ? 'text-red-500' : 'text-primary'}`}>{fmt(bizBalance)}</p>
-          <p className="text-xs text-ink-secondary mt-1">Commissions, fees, agency revenue</p>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-card border border-border bg-white shadow-card">
-        <div className="border-b border-border px-5 py-3.5 flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-light text-primary"><Landmark size={14} /></span>
-          <h3 className="text-sm font-bold text-ink">Ledger</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-surface-2 text-xs font-semibold text-ink-secondary">
-              <tr>{['Date','Type','Description','Reference','Amount','Trust Bal','Biz Bal'].map(h=><th key={h} className="px-4 py-3 text-left">{h}</th>)}</tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {withBalance.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-ink-secondary">No entries yet.</td></tr>}
-              {withBalance.map(e => (
-                <tr key={e.id} className="hover:bg-surface-2/50">
-                  <td className="px-4 py-3 text-ink-secondary">{e.date}</td>
-                  <td className={`px-4 py-3 text-xs font-semibold ${typeColor(e.type)}`}>{e.type}</td>
-                  <td className="px-4 py-3 text-ink">{e.description}</td>
-                  <td className="px-4 py-3 text-ink-secondary">{e.reference}</td>
-                  <td className="px-4 py-3">{amtDisplay(e)}</td>
-                  <td className="px-4 py-3 font-semibold text-ink">{fmt(e.trustBalance)}</td>
-                  <td className="px-4 py-3 font-semibold text-ink">{fmt(e.bizBalance)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <Modal open={open} onClose={() => setOpen(false)} title="New Ledger Entry">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Date" type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
-            <Field label="Type" select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))}>
-              {['Trust Receipt','Trust Disbursement','Business Receipt','Business Disbursement'].map(t=><option key={t}>{t}</option>)}
-            </Field>
-            <Field label="Amount (R) *" type="number" value={form.amount} onChange={e => setForm(f=>({...f,amount:e.target.value}))} />
-            <Field label="Reference" value={form.reference} onChange={e => setForm(f=>({...f,reference:e.target.value}))} />
-          </div>
-          <Field label="Description *" value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Entry</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
 
 // ── Owner Statements ───────────────────────────────────────────────────────────
 function OwnerStatements() {
@@ -896,94 +1298,6 @@ function OwnerStatements() {
   )
 }
 
-// ── Commission ────────────────────────────────────────────────────────────────
-function Commission() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const commissions = useCollection(uid ? `users/${uid}/commissions` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({
-    type: 'Letting', property: '', transactionValue: '', commissionRate: '8',
-    description: '', date: new Date().toISOString().slice(0,10), status: 'Pending',
-  })
-
-  const commissionAmt = Number(form.transactionValue || 0) * Number(form.commissionRate || 0) / 100
-
-  async function save() {
-    if (!uid || !form.property) return
-    await addDoc(collection(db, 'users', uid, 'commissions'), {
-      ...form, commissionAmount: commissionAmt, createdAt: serverTimestamp(),
-    })
-    setOpen(false)
-    setForm({ type: 'Letting', property: '', transactionValue: '', commissionRate: '8', description: '', date: new Date().toISOString().slice(0,10), status: 'Pending' })
-  }
-
-  const statusColor = s => ({ Pending: 'bg-amber-100 text-amber-700', Invoiced: 'bg-blue-100 text-blue-600', Paid: 'bg-green-100 text-green-700' }[s] ?? '')
-
-  const cols = [
-    { key: 'date', label: 'Date' },
-    { key: 'type', label: 'Type' },
-    { key: 'property', label: 'Property' },
-    { key: 'transactionValue', label: 'Transaction Value', render: r => fmt(r.transactionValue) },
-    { key: 'commissionRate', label: 'Rate', render: r => `${r.commissionRate}%` },
-    { key: 'commissionAmount', label: 'Commission', render: r => <span className="font-semibold text-primary">{fmt(r.commissionAmount)}</span> },
-    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status}</span> },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex gap-1">
-        {r.status === 'Pending' && (
-          <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'commissions', r.id), { status: 'Invoiced' }) }}
-            className="rounded px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50">Invoice</button>
-        )}
-        {r.status === 'Invoiced' && (
-          <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'commissions', r.id), { status: 'Paid' }) }}
-            className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Mark Paid</button>
-        )}
-      </div>
-    )},
-  ]
-
-  const totalPending = commissions.filter(c=>c.status==='Pending').reduce((s,c)=>s+Number(c.commissionAmount??0),0)
-  const totalPaid = commissions.filter(c=>c.status==='Paid').reduce((s,c)=>s+Number(c.commissionAmount??0),0)
-
-  return (
-    <div className="space-y-4">
-      <PageHead title="Commission Tracking" subtitle="Sales & lettings commissions"
-        action={<AddButton onClick={() => setOpen(true)}>Add Commission</AddButton>} />
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="Pending" value={fmt(totalPending)} icon="⏳" color="orange" />
-        <StatCard label="Paid" value={fmt(totalPaid)} icon="✅" color="blue" />
-        <StatCard label="Total Commissions" value={commissions.length} icon="📊" />
-      </div>
-
-      <DataTable columns={cols} data={commissions} emptyMessage="No commissions recorded yet." />
-
-      <Modal open={open} onClose={() => setOpen(false)} title="New Commission">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Type" select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))}>
-              {['Letting','Sale','Management','Other'].map(t=><option key={t}>{t}</option>)}
-            </Field>
-            <Field label="Date" type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
-            <Field label="Property *" value={form.property} onChange={e => setForm(f=>({...f,property:e.target.value}))} />
-            <Field label="Transaction Value (R)" type="number" value={form.transactionValue} onChange={e => setForm(f=>({...f,transactionValue:e.target.value}))} />
-            <Field label="Commission Rate (%)" type="number" value={form.commissionRate} onChange={e => setForm(f=>({...f,commissionRate:e.target.value}))} />
-            <Field label="Status" select value={form.status} onChange={e => setForm(f=>({...f,status:e.target.value}))}>
-              {['Pending','Invoiced','Paid'].map(s=><option key={s}>{s}</option>)}
-            </Field>
-          </div>
-          <Field label="Description / Notes" textarea value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
-          {form.transactionValue && (
-            <div className="rounded-xl bg-primary-light px-4 py-3">
-              <p className="text-sm font-bold text-ink">Commission Amount: {fmt(commissionAmt)}</p>
-            </div>
-          )}
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Commission</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
 
 // ── Maintenance ───────────────────────────────────────────────────────────────
 function Maintenance() {
@@ -1036,55 +1350,7 @@ function Maintenance() {
   )
 }
 
-// ── Owners ────────────────────────────────────────────────────────────────────
-function Owners() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const owners = useCollection(uid ? `users/${uid}/owners` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', phone: '', idNumber: '', bankName: '', accountNumber: '', accountType: '', branchCode: '' })
-  async function save() {
-    if (!uid || !form.name) { alert('Owner name is required.'); return }
-    await addDoc(collection(db, 'users', uid, 'owners'), { ...form, createdAt: serverTimestamp() })
-    setOpen(false); setForm({ name: '', email: '', phone: '', idNumber: '', bankName: '', accountNumber: '', accountType: '', branchCode: '' })
-  }
-  const cols = [
-    { key: 'name', label: 'Owner Name' },
-    { key: 'email', label: 'Email' },
-    { key: 'phone', label: 'Phone' },
-    { key: 'idNumber', label: 'ID Number' },
-    { key: 'bankName', label: 'Bank' },
-    { key: 'accountNumber', label: 'Account No.' },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this owner? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'owners', r.id)) }}
-        className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-    )},
-  ]
-  return (
-    <div className="space-y-4">
-      <PageHead title="Owners" subtitle="Property owner contact & banking details"
-        action={<AddButton onClick={() => setOpen(true)}>Add Owner</AddButton>} />
-      <DataTable columns={cols} data={owners} emptyMessage="No owners added yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Owner" size="lg">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2"><Field label="Full Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-          <Field label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          <Field label="Phone (+27…)" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-          <div className="col-span-2"><Field label="SA ID Number" value={form.idNumber} onChange={e => setForm(f => ({ ...f, idNumber: e.target.value }))} /></div>
-          <div className="col-span-2"><p className="text-xs font-semibold text-ink-secondary mt-2 mb-1">Banking Details</p></div>
-          <Field label="Bank Name" value={form.bankName} onChange={e => setForm(f => ({ ...f, bankName: e.target.value }))} />
-          <Field label="Account Number" value={form.accountNumber} onChange={e => setForm(f => ({ ...f, accountNumber: e.target.value }))} />
-          <Field label="Account Type" select value={form.accountType} onChange={e => setForm(f => ({ ...f, accountType: e.target.value }))}>
-            <option value="">Select…</option>
-            {['Cheque / Current', 'Savings', 'Transmission'].map(t => <option key={t}>{t}</option>)}
-          </Field>
-          <Field label="Branch Code" value={form.branchCode} onChange={e => setForm(f => ({ ...f, branchCode: e.target.value }))} />
-        </div>
-        <button onClick={save} className="mt-4 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Save Owner</button>
-      </Modal>
-    </div>
-  )
-}
+
 
 // ── Appointments (Property) ───────────────────────────────────────────────────
 const PROP_APPT_STATUS = ['Scheduled', 'Confirmed', 'Completed', 'Cancelled', 'No-show']
@@ -1292,18 +1558,7 @@ function Documents() {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
-  const { user } = useAuth()
-  return (
-    <div className="space-y-4">
-      <h2 className="text-base font-bold text-ink">Settings</h2>
-      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
-        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
-        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
-          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
-        </p>
-      </div>
-    </div>
-  )
+  return <SettingsPage industry="property" />
 }
 
 export default function PropertyDashboard() {
@@ -1314,18 +1569,13 @@ export default function PropertyDashboard() {
         <Route path="properties" element={<Properties />} />
         <Route path="tenants" element={<Tenants />} />
         <Route path="rent-roll" element={<RentRoll />} />
-        <Route path="utilities" element={<Utilities />} />
-        <Route path="trust-account" element={<TrustAccount />} />
         <Route path="statements" element={<OwnerStatements />} />
-        <Route path="commission" element={<Commission />} />
         <Route path="maintenance" element={<Maintenance />} />
-        <Route path="owners" element={<Owners />} />
         <Route path="appointments" element={<PropertyAppointments />} />
         <Route path="messages" element={<Messages />} />
         <Route path="documents" element={<Documents />} />
         <Route path="campaigns" element={<CampaignsModule industry="property" />} />
         <Route path="profile" element={<ProfilePage industry="property" />} />
-        <Route path="popia" element={<PopiaModule />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
       </Routes>

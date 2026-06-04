@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import DashboardLayout from '../../shared/DashboardLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -7,7 +7,6 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
@@ -18,11 +17,12 @@ import {
   Download, Mail, Pencil, Save as SaveIcon,
   User, Calendar, Stethoscope, Activity, Pill, ClipboardList,
   Heart, Thermometer, Droplet, Wind, Gauge, Scale, AlertTriangle, Phone,
-  CreditCard, Users, Clock,
+  CreditCard, Users, Clock, ChevronLeft, ChevronRight, LayoutList, CalendarDays,
 } from 'lucide-react'
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import CampaignsModule from '../../shared/CampaignsModule'
+import SettingsPage from '../../shared/SettingsPage'
 
 /* ────────────────────────────────────────────────────────────────────────────
    PDF generation (shared) — uses @react-pdf/renderer's pdf() to build a Blob
@@ -1720,66 +1720,270 @@ const APPT_BLANK = {
   time: '', duration: '30', reason: '', appointmentType: 'Consultation', room: '',
   status: 'Scheduled', notes: '', reminderSent: false,
 }
-const APPT_TYPES = ['Consultation','Follow-up','Procedure','Vaccination','Screening','Telehealth','Emergency']
+const APPT_TYPES  = ['Consultation','Follow-up','Procedure','Vaccination','Screening','Telehealth','Emergency']
 const APPT_STATUS = ['Scheduled','Confirmed','Arrived','Completed','Cancelled','No-show']
+
+const CAL_START = 7
+const CAL_END   = 20
+const SLOT_H    = 60   // px per hour — full-height column approach
+const CAL_TOTAL_H = (CAL_END - CAL_START) * SLOT_H
+const CAL_HOURS = Array.from({ length: CAL_END - CAL_START }, (_, i) => CAL_START + i)
+const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+
+const BLOCK_COLORS = {
+  Scheduled: { bg: '#EFF6FF', border: '#3B82F6', text: '#1E40AF' },
+  Confirmed: { bg: '#F0FDF4', border: '#16A34A', text: '#15803D' },
+  Arrived:   { bg: '#FAF5FF', border: '#9333EA', text: '#7E22CE' },
+  Completed: { bg: '#F0FDF4', border: '#5B8E7D', text: '#166534' },
+  Cancelled: { bg: '#FEF2F2', border: '#EF4444', text: '#B91C1C' },
+  'No-show': { bg: '#FFF7ED', border: '#F97316', text: '#C2410C' },
+}
+
+const BADGE_COLORS = {
+  Scheduled:  'bg-blue-50 text-blue-700',
+  Confirmed:  'bg-green-50 text-green-700',
+  Arrived:    'bg-purple-50 text-purple-700',
+  Completed:  'bg-primary-light text-primary',
+  Cancelled:  'bg-red-50 text-red-600',
+  'No-show':  'bg-orange-50 text-orange-600',
+}
+
+function toMins(t) {
+  if (!t) return null
+  const [h, m] = t.split(':').map(Number)
+  return h * 60 + (m || 0)
+}
+
+function getWeekStart(date) {
+  const d = new Date(date)
+  const day = d.getDay()
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function getWeekDays(ws) {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(ws); d.setDate(ws.getDate() + i); return d
+  })
+}
+
+function fmtDateStr(d) { return d.toISOString().slice(0, 10) }
+
+function fmtHour(h) {
+  if (h === 12) return '12 PM'
+  return h < 12 ? `${h} AM` : `${h - 12} PM`
+}
+
+// Resolve overlapping appointments into side-by-side columns
+function resolveOverlaps(appts) {
+  const sorted = [...appts].sort((a, b) => (toMins(a.time) || 0) - (toMins(b.time) || 0))
+  const cols = []
+  sorted.forEach(appt => {
+    const start = toMins(appt.time) || 0
+    const end   = start + Number(appt.duration || 30)
+    let placed  = false
+    for (let ci = 0; ci < cols.length; ci++) {
+      const last    = cols[ci][cols[ci].length - 1]
+      const lastEnd = (toMins(last.time) || 0) + Number(last.duration || 30)
+      if (start >= lastEnd) { cols[ci].push(appt); placed = true; break }
+    }
+    if (!placed) cols.push([appt])
+  })
+  const result = {}
+  cols.forEach((col, ci) => col.forEach(a => { result[a.id] = { col: ci, total: cols.length } }))
+  return result
+}
+
+function CalApptBlock({ appt, layout, onClick }) {
+  const mins = toMins(appt.time)
+  if (mins === null) return null
+  const top    = (mins - CAL_START * 60) / 60 * SLOT_H
+  const height = Math.max(Number(appt.duration || 30) / 60 * SLOT_H - 2, 18)
+  if (top < 0 || top >= CAL_TOTAL_H) return null
+
+  const { col = 0, total = 1 } = layout || {}
+  const pct    = 100 / total
+  const colors = BLOCK_COLORS[appt.status] || { bg: '#F9FAFB', border: '#9CA3AF', text: '#374151' }
+
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onClick(appt) }}
+      style={{
+        position: 'absolute',
+        top:    top + 1,
+        height,
+        left:   `calc(${col * pct}% + 2px)`,
+        width:  `calc(${pct}% - 4px)`,
+        backgroundColor: colors.bg,
+        borderLeft: `3px solid ${colors.border}`,
+        color: colors.text,
+      }}
+      className="rounded-md px-1.5 py-0.5 text-left overflow-hidden hover:brightness-95 transition-all shadow-sm"
+    >
+      <p className="text-[10px] font-bold leading-tight truncate">{appt.time} — {appt.patient}</p>
+      {height > 32 && <p className="text-[9px] leading-tight opacity-75 truncate">{appt.appointmentType}{appt.practitioner ? ` · ${appt.practitioner}` : ''}</p>}
+    </button>
+  )
+}
 
 function Appointments() {
   const { user } = useAuth()
   const uid = user?.uid
-  const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
-  const patients = useCollection(uid ? `users/${uid}/patients` : null)
+  const appointments  = useCollection(uid ? `users/${uid}/appointments` : null)
+  const patients      = useCollection(uid ? `users/${uid}/patients` : null)
   const practitioners = useCollection(uid ? `users/${uid}/practitioners` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState(APPT_BLANK)
-  const [saving, setSaving] = useState(false)
-  const [sendingId, setSendingId] = useState(null)
+
+  const scrollRef = useRef(null)
+
+  // Form state
+  const [open,     setOpen]    = useState(false)
+  const [editing,  setEditing] = useState(null)   // null = new, object = edit
+  const [form,     setForm]    = useState(APPT_BLANK)
+  const [sendSms,  setSendSms] = useState(false)
+  const [saving,   setSaving]  = useState(false)
+  const [sendingId,setSendingId] = useState(null)
+  const [detailAppt, setDetailAppt] = useState(null)
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
+  // Calendar state
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const [calView,  setCalView]  = useState('week')
+  const [mainView, setMainView] = useState('calendar')
+  const [anchor,   setAnchor]   = useState(() => getWeekStart(new Date()))
+
+  const days = useMemo(() =>
+    calView === 'week' ? getWeekDays(anchor) : [anchor],
+    [calView, anchor]
+  )
+
+  // Scroll to current time on mount
+  useMemo(() => {
+    setTimeout(() => {
+      if (!scrollRef.current) return
+      const now = new Date()
+      const nowMins = now.getHours() * 60 + now.getMinutes()
+      const top = (nowMins - CAL_START * 60) / 60 * SLOT_H - 100
+      scrollRef.current.scrollTop = Math.max(0, top)
+    }, 100)
+  }, [mainView])
+
+  function openNew(ds, hour) {
+    setEditing(null)
+    const patient = null
+    setSendSms(false)
+    setForm({ ...APPT_BLANK, date: ds || todayStr, time: hour ? `${String(hour).padStart(2,'0')}:00` : '' })
+    setOpen(true)
+  }
+
+  function openEdit(appt) {
+    setEditing(appt)
+    const patient = patients.find(p => `${p.firstName} ${p.lastName}` === appt.patient)
+    setSendSms(false)
+    setForm({
+      patientId: patient?.id || '', practitioner: appt.practitioner || '',
+      date: appt.date || '', time: appt.time || '', duration: appt.duration || '30',
+      reason: appt.reason || '', appointmentType: appt.appointmentType || 'Consultation',
+      room: appt.room || '', status: appt.status || 'Scheduled', notes: appt.notes || '',
+      reminderSent: appt.reminderSent || false,
+    })
+    setDetailAppt(null)
+    setOpen(true)
+  }
+
+  function navPrev() {
+    const d = new Date(anchor); d.setDate(d.getDate() - (calView === 'week' ? 7 : 1)); setAnchor(d)
+  }
+  function navNext() {
+    const d = new Date(anchor); d.setDate(d.getDate() + (calView === 'week' ? 7 : 1)); setAnchor(d)
+  }
+  function goToday() {
+    if (calView === 'week') { setAnchor(getWeekStart(new Date())) }
+    else { const d = new Date(); d.setHours(0,0,0,0); setAnchor(d) }
+  }
+  function switchCalView(v) {
+    setCalView(v)
+    if (v === 'day') { const d = new Date(); d.setHours(0,0,0,0); setAnchor(d) }
+    else { setAnchor(getWeekStart(new Date())) }
+  }
+
+  const rangeLabel = useMemo(() => {
+    if (calView === 'day') return anchor.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    const ws = days[0]; const we = days[6]
+    return ws.getMonth() === we.getMonth()
+      ? `${ws.getDate()}–${we.getDate()} ${ws.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`
+      : `${ws.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })} – ${we.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  }, [calView, anchor, days])
+
+  const apptsByDate = useMemo(() => {
+    const map = {}
+    appointments.forEach(a => { if (!map[a.date]) map[a.date] = []; map[a.date].push(a) })
+    return map
+  }, [appointments])
+
+  const todayAppts = (apptsByDate[todayStr] || []).length
+  const scheduled  = appointments.filter(a => a.status === 'Scheduled' || a.status === 'Confirmed').length
+
+  // Now indicator
+  const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
+  const nowTop  = (nowMins - CAL_START * 60) / 60 * SLOT_H
+  const showNow = nowTop >= 0 && nowTop < CAL_TOTAL_H
+
+  async function sendSmsConfirmation(patient, apptData, isEdit) {
+    if (!patient?.phone) return
+    try {
+      const fn  = httpsCallable(functions, 'sendSMS')
+      const msg = isEdit
+        ? `Hi ${patient.firstName}, your appointment on ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''} has been updated. Reply if you have questions.`
+        : `Hi ${patient.firstName}, your appointment has been booked for ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''}. Reply to reschedule.`
+      await fn({ to: patient.phone, message: msg })
+      await addDoc(collection(db, 'users', uid, 'messages'), {
+        to: patient.phone, type: 'sms', body: msg,
+        module: isEdit ? 'appointment-updated' : 'appointment-confirmed',
+        status: 'sent', sentAt: serverTimestamp(),
+      })
+    } catch { /* SMS failure is non-blocking */ }
+  }
+
   async function save() {
-    if (!uid) return
-    if (!form.patientId || !form.date || !form.time) { alert('Patient, date and time are required.'); return }
+    if (!uid || !form.patientId || !form.date || !form.time) { alert('Patient, date and time are required.'); return }
     setSaving(true)
     try {
       const patient = patients.find(p => p.id === form.patientId)
-      await addDoc(collection(db, 'users', uid, 'appointments'), {
+      const payload = {
         ...form,
         patient: patient ? `${patient.firstName} ${patient.lastName}` : '',
         patientPhone: patient?.phone || '',
-        createdAt: serverTimestamp(),
-      })
-      setForm(APPT_BLANK); setOpen(false)
+      }
+      if (editing) {
+        await updateDoc(doc(db, 'users', uid, 'appointments', editing.id), payload)
+      } else {
+        await addDoc(collection(db, 'users', uid, 'appointments'), { ...payload, createdAt: serverTimestamp() })
+      }
+      if (sendSms && patient) await sendSmsConfirmation(patient, payload, !!editing)
+      setOpen(false); setForm(APPT_BLANK); setEditing(null); setSendSms(false)
     } finally { setSaving(false) }
   }
 
-  async function setStatus(appt, status) {
+  async function setApptStatus(appt, status) {
     await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { status })
+    if (detailAppt?.id === appt.id) setDetailAppt(prev => ({ ...prev, status }))
   }
 
-  // SMS reminder via BulkSMS Cloud Function (sendSMS)
   async function sendReminder(appt) {
     if (!appt.patientPhone) { alert('No phone number on this patient.'); return }
     setSendingId(appt.id)
     try {
-      const fn = httpsCallable(functions, 'sendSMS')
-      const msg = `Reminder: ${appt.patient}, you have an appointment on ${appt.date} at ${appt.time}` +
-        `${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Reply to reschedule.`
+      const fn  = httpsCallable(functions, 'sendSMS')
+      const msg = `Reminder: ${appt.patient}, you have an appointment on ${appt.date} at ${appt.time}${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Reply to reschedule.`
       await fn({ to: appt.patientPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
-      // log to messages collection
       await addDoc(collection(db, 'users', uid, 'messages'), {
-        to: appt.patientPhone, type: 'sms', body: msg, module: 'appointment-reminder',
-        status: 'sent', sentAt: serverTimestamp(),
+        to: appt.patientPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp(),
       })
-    } catch {
-      alert('Reminder failed — check the sendSMS Cloud Function / BulkSMS credentials.')
-    } finally { setSendingId(null) }
+    } catch { alert('Reminder failed — check BulkSMS credentials.') }
+    finally { setSendingId(null) }
   }
-
-  const badge = s => ({
-    Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary',
-    Arrived: 'bg-purple-50 text-purple-600', Completed: 'bg-green-50 text-green-600',
-    Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500',
-  }[s] || 'bg-surface-2 text-ink-secondary')
 
   const cols = [
     { key: 'date', label: 'Date' },
@@ -1788,16 +1992,15 @@ function Appointments() {
     { key: 'practitioner', label: 'Practitioner' },
     { key: 'appointmentType', label: 'Type' },
     { key: 'status', label: 'Status', render: r => (
-      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setStatus(r, e.target.value) }}
-        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
+      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
+        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${BADGE_COLORS[r.status] || 'bg-surface-2 text-ink-secondary'}`}>
         {APPT_STATUS.map(s => <option key={s}>{s}</option>)}
       </select>
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id}
-          title="Send SMS reminder"
-          className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+        <button onClick={() => openEdit(r)} className="rounded p-1 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
+        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
           {sendingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
         </button>
         <button onClick={() => { if (!window.confirm('Delete this appointment? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'appointments', r.id)) }}
@@ -1806,18 +2009,177 @@ function Appointments() {
     )},
   ]
 
+  const selectedPatient = patients.find(p => p.id === form.patientId)
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Appointments</h2>
-        <button onClick={() => { setForm(APPT_BLANK); setOpen(true) }}
+
+      {/* Page header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-ink">Appointments</h2>
+          <p className="mt-0.5 text-xs text-ink-secondary">{todayAppts} today · {scheduled} upcoming</p>
+        </div>
+        <button onClick={() => openNew()}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
           <PlusCircle size={15} /> Book Appointment
         </button>
       </div>
-      <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Book Appointment" size="lg">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-white px-4 py-2.5 shadow-sm">
+        <div className="flex items-center gap-2">
+          <button onClick={goToday}
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+            Today
+          </button>
+          <div className="flex">
+            <button onClick={navPrev} className="rounded-l-lg border border-border p-1.5 text-ink hover:bg-surface-2 transition">
+              <ChevronLeft size={15} />
+            </button>
+            <button onClick={navNext} className="rounded-r-lg border-y border-r border-border p-1.5 text-ink hover:bg-surface-2 transition">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+          <span className="text-sm font-semibold text-ink">{rangeLabel}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-border">
+            {[{ key: 'day', label: 'Day' }, { key: 'week', label: 'Week' }].map(v => (
+              <button key={v.key} onClick={() => switchCalView(v.key)}
+                className={`px-3 py-1.5 text-xs font-semibold transition ${calView === v.key ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-border">
+            <button onClick={() => setMainView('calendar')} title="Calendar"
+              className={`p-2 transition ${mainView === 'calendar' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              <CalendarDays size={14} />
+            </button>
+            <button onClick={() => setMainView('list')} title="List"
+              className={`p-2 border-l border-border transition ${mainView === 'list' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              <LayoutList size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* List view */}
+      {mainView === 'list' && (
+        <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
+      )}
+
+      {/* ── Calendar view ── */}
+      {mainView === 'calendar' && (
+        <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm select-none">
+
+          {/* Day header */}
+          <div className="flex border-b border-border bg-white sticky top-0 z-10">
+            {/* GMT label */}
+            <div className="w-[52px] flex-shrink-0 border-r border-border flex items-end justify-center pb-2">
+              <span className="text-[9px] font-semibold text-ink-secondary">SAST</span>
+            </div>
+            {days.map((d, i) => {
+              const ds      = fmtDateStr(d)
+              const isToday = ds === todayStr
+              const count   = (apptsByDate[ds] || []).length
+              return (
+                <div key={i} className={`flex-1 border-r last:border-r-0 border-border py-2 flex flex-col items-center gap-0.5 ${isToday ? 'bg-primary-light/20' : ''}`}>
+                  <p className={`text-[10px] font-semibold uppercase tracking-widest ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                    {DAY_LABELS[i % 7]}
+                  </p>
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-primary text-white' : 'text-ink'}`}>
+                    {d.getDate()}
+                  </div>
+                  {count > 0 && (
+                    <span className={`text-[9px] font-semibold ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                      {count} appt{count !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Scrollable timeline */}
+          <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: 580 }}>
+            <div className="flex">
+
+              {/* Time gutter */}
+              <div className="w-[52px] flex-shrink-0 border-r border-border relative" style={{ height: CAL_TOTAL_H }}>
+                {CAL_HOURS.map(h => (
+                  <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H - 8, right: 6 }}>
+                    <span className="text-[10px] text-ink-secondary/70 font-medium whitespace-nowrap">{fmtHour(h)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Day columns */}
+              {days.map((d, di) => {
+                const ds       = fmtDateStr(d)
+                const isToday  = ds === todayStr
+                const dayAppts = apptsByDate[ds] || []
+                const layouts  = resolveOverlaps(dayAppts)
+
+                return (
+                  <div key={di}
+                    className={`flex-1 border-r last:border-r-0 border-border relative ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}
+                    style={{ height: CAL_TOTAL_H }}
+                    onClick={e => {
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const clickY = e.clientY - rect.top + e.currentTarget.parentElement.parentElement.scrollTop
+                      const h = Math.floor(clickY / SLOT_H) + CAL_START
+                      if (h >= CAL_START && h < CAL_END) openNew(ds, h)
+                    }}
+                  >
+                    {/* Hour lines */}
+                    {CAL_HOURS.map(h => (
+                      <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H, left: 0, right: 0 }}
+                        className="border-t border-border/40" />
+                    ))}
+                    {/* Half-hour lines */}
+                    {CAL_HOURS.map(h => (
+                      <div key={`${h}h`} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H + SLOT_H / 2, left: 0, right: 0 }}
+                        className="border-t border-dashed border-border/25" />
+                    ))}
+
+                    {/* Current time indicator — only on today's column */}
+                    {isToday && showNow && (
+                      <div style={{ position: 'absolute', top: nowTop, left: 0, right: 0, zIndex: 5 }}
+                        className="pointer-events-none flex items-center">
+                        <div className="h-[9px] w-[9px] rounded-full bg-red-500 flex-shrink-0 -ml-[5px]" />
+                        <div className="h-[2px] flex-1 bg-red-500" />
+                      </div>
+                    )}
+
+                    {/* Appointment blocks */}
+                    {dayAppts.map(a => (
+                      <CalApptBlock key={a.id} appt={a} layout={layouts[a.id]} onClick={setDetailAppt} />
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 bg-surface-2/40 px-4 py-2">
+            {APPT_STATUS.map(s => {
+              const c = BLOCK_COLORS[s] || { border: '#9CA3AF', text: '#374151' }
+              return (
+                <span key={s} className="flex items-center gap-1.5 text-[10px] font-medium" style={{ color: c.text }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, borderLeft: `3px solid ${c.border}`, backgroundColor: c.bg, display: 'inline-block' }} />
+                  {s}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Book / Edit modal */}
+      <Modal open={open} onClose={() => { setOpen(false); setEditing(null) }} title={editing ? 'Edit Appointment' : 'Book Appointment'} size="lg">
         <div className="grid grid-cols-2 gap-4">
           <SectionTitle>Booking</SectionTitle>
           <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
@@ -1830,8 +2192,8 @@ function Appointments() {
           </Field>
           <Field label="Date *" type="date" value={form.date} onChange={set('date')} />
           <Field label="Time *" type="time" value={form.time} onChange={set('time')} />
-          <Field label="Duration (min)" select value={form.duration} onChange={set('duration')}>
-            {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d}</option>)}
+          <Field label="Duration" select value={form.duration} onChange={set('duration')}>
+            {['15','30','45','60','90'].map(d => <option key={d} value={d}>{d} min</option>)}
           </Field>
           <Field label="Type" select value={form.appointmentType} onChange={set('appointmentType')}>
             {APPT_TYPES.map(t => <option key={t}>{t}</option>)}
@@ -1843,9 +2205,98 @@ function Appointments() {
           <div className="col-span-2"><Field label="Reason for Visit" value={form.reason} onChange={set('reason')} /></div>
           <div className="col-span-2"><Field label="Notes" textarea value={form.notes} onChange={set('notes')} /></div>
         </div>
-        <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
-          {saving ? 'Saving…' : 'Save Appointment'}
+
+        {/* SMS toggle */}
+        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-3">
+          <input type="checkbox" checked={sendSms} onChange={e => setSendSms(e.target.checked)}
+            className="h-4 w-4 accent-primary" />
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              Send SMS {editing ? 'update' : 'confirmation'} to patient
+            </p>
+            <p className="text-xs text-ink-secondary">
+              {selectedPatient?.phone
+                ? `Will send to ${selectedPatient.phone}`
+                : 'Select a patient with a phone number'}
+            </p>
+          </div>
+        </label>
+
+        <button onClick={save} disabled={saving}
+          className="mt-4 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          {saving
+            ? 'Saving…'
+            : editing
+              ? `Save Changes${sendSms ? ' & Send SMS' : ''}`
+              : `Book Appointment${sendSms ? ' & Send SMS' : ''}`}
         </button>
+      </Modal>
+
+      {/* Appointment detail popover */}
+      <Modal open={!!detailAppt} onClose={() => setDetailAppt(null)} title="Appointment">
+        {detailAppt && (
+          <div className="space-y-4">
+            {/* Header card */}
+            <div className="rounded-xl px-4 py-3" style={{ backgroundColor: BLOCK_COLORS[detailAppt.status]?.bg || '#F9FAFB', borderLeft: `4px solid ${BLOCK_COLORS[detailAppt.status]?.border || '#9CA3AF'}` }}>
+              <p className="font-bold text-ink">{detailAppt.patient}</p>
+              <p className="text-sm text-ink-secondary mt-0.5">
+                {detailAppt.date} · {detailAppt.time} · {detailAppt.duration} min
+                {detailAppt.practitioner ? ` · ${detailAppt.practitioner}` : ''}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Type', value: detailAppt.appointmentType },
+                { label: 'Room', value: detailAppt.room || '—' },
+                { label: 'Status', value: detailAppt.status },
+                { label: 'SMS Reminder', value: detailAppt.reminderSent ? 'Sent ✓' : 'Not sent' },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-xl bg-surface-2 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
+                  <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {(detailAppt.reason || detailAppt.notes) && (
+              <div className="rounded-xl bg-surface-2 px-3 py-2.5 space-y-1">
+                {detailAppt.reason && <p className="text-xs text-ink"><span className="font-semibold">Reason:</span> {detailAppt.reason}</p>}
+                {detailAppt.notes  && <p className="text-xs text-ink"><span className="font-semibold">Notes:</span>  {detailAppt.notes}</p>}
+              </div>
+            )}
+
+            {/* Quick status */}
+            <div>
+              <p className="mb-2 text-xs font-semibold text-ink-secondary">Update status</p>
+              <div className="flex flex-wrap gap-1.5">
+                {APPT_STATUS.map(s => (
+                  <button key={s} onClick={() => setApptStatus(detailAppt, s)}
+                    style={detailAppt.status === s ? { backgroundColor: BLOCK_COLORS[s]?.bg, color: BLOCK_COLORS[s]?.text, borderColor: BLOCK_COLORS[s]?.border } : {}}
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${detailAppt.status === s ? 'border-current' : 'border-border text-ink-secondary hover:bg-surface-2'}`}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => openEdit(detailAppt)}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-border py-2 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+                <Pencil size={12} /> Edit
+              </button>
+              <button onClick={() => sendReminder(detailAppt)} disabled={sendingId === detailAppt.id}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-border py-2 text-xs font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                {sendingId === detailAppt.id ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />}
+                Remind
+              </button>
+              <button onClick={() => { if (!window.confirm('Delete this appointment?')) return; deleteDoc(doc(db, 'users', uid, 'appointments', detailAppt.id)); setDetailAppt(null) }}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-red-200 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition">
+                <Trash2 size={12} /> Delete
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
@@ -2592,18 +3043,7 @@ function Surveys() {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
-  const { user } = useAuth()
-  return (
-    <div className="space-y-4">
-      <h2 className="text-base font-bold text-ink">Settings</h2>
-      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
-        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
-        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
-          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
-        </p>
-      </div>
-    </div>
-  )
+  return <SettingsPage industry="medical" />
 }
 
 export default function MedicalDashboard() {
@@ -2621,7 +3061,7 @@ export default function MedicalDashboard() {
         <Route path="surveys" element={<Surveys />} />
         <Route path="campaigns" element={<CampaignsModule industry="medical" />} />
         <Route path="profile" element={<ProfilePage industry="medical" />} />
-        <Route path="popia" element={<PopiaModule />} />
+
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
       </Routes>

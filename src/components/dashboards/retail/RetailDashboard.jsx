@@ -7,13 +7,13 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import PopiaModule from '../../shared/PopiaModule'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Trash2, Tag, Calendar, Eye, Pencil, Bell, Loader2, X } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import SetupChecklist from '../../shared/SetupChecklist'
+import SettingsPage from '../../shared/SettingsPage'
 
 // ── Shared layout helpers ───────────────────────────────────────────────────
 function PageHead({ title, subtitle, action }) {
@@ -506,18 +506,7 @@ function OptIn() {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
-  const { user } = useAuth()
-  return (
-    <div className="space-y-4">
-      <h2 className="text-base font-bold text-ink">Settings</h2>
-      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
-        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
-        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
-          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
-        </p>
-      </div>
-    </div>
-  )
+  return <SettingsPage industry="retail" />
 }
 
 export default function RetailDashboard() {
@@ -533,7 +522,7 @@ export default function RetailDashboard() {
         <Route path="optin" element={<OptIn />} />
         <Route path="campaigns" element={<CampaignsModule industry="retail" />} />
         <Route path="profile" element={<ProfilePage industry="retail" />} />
-        <Route path="popia" element={<PopiaModule />} />
+
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
       </Routes>

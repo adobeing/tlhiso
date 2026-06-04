@@ -7,13 +7,13 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import PopiaModule from '../../shared/PopiaModule'
 import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import SetupChecklist from '../../shared/SetupChecklist'
+import SettingsPage from '../../shared/SettingsPage'
 
 // ── Shared form field ─────────────────────────────────────────────────────────
 function Field({ label, error, textarea, select, children, ...props }) {
@@ -749,17 +749,7 @@ function SimplePage({ title, children }) {
 }
 
 function Settings() {
-  const { user } = useAuth()
-  return (
-    <SimplePage title="Settings">
-      <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-3">
-        <p className="text-sm text-ink-secondary">Email: <strong className="text-ink">{user?.email}</strong></p>
-        <p className="text-sm text-ink-secondary">To change your password, use the{' '}
-          <a href="/forgot-password" className="text-primary font-semibold hover:underline">password reset</a> flow.
-        </p>
-      </div>
-    </SimplePage>
-  )
+  return <SettingsPage industry="b2b" />
 }
 
 export default function B2BDashboard() {
@@ -779,7 +769,7 @@ export default function B2BDashboard() {
         <Route path="marketing-optin" element={<MarketingOptIn />} />
         <Route path="campaigns" element={<CampaignsModule industry="b2b" />} />
         <Route path="profile" element={<ProfilePage industry="b2b" />} />
-        <Route path="popia" element={<PopiaModule />} />
+
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<SimplePage title="Coming Soon"><p className="text-sm text-ink-secondary">This section is being built. Check back soon.</p></SimplePage>} />
       </Routes>
