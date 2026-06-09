@@ -2029,7 +2029,8 @@ function PropertyAppointments() {
     setSendingId(appt.id)
     try {
       const fn = httpsCallable(functions, 'sendSMS')
-      const msg = `Reminder: ${appt.customer}, you have a property appointment on ${appt.date} at ${appt.time}. Reply to reschedule.`
+      const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
+      const msg = `Reminder: ${appt.customer}, you have a property appointment on ${appt.date} at ${appt.time}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.customerPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), { to: appt.customerPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp() })
@@ -2050,10 +2051,23 @@ function PropertyAppointments() {
       </a>
     ) : <span className="text-xs text-ink-secondary">—</span> },
     { key: 'status', label: 'Status', render: r => (
-      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
-        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
-        {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
-      </select>
+      <div className="space-y-1">
+        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
+          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
+          {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        {r.confirmationStatus && (
+          <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            r.confirmationStatus === 'confirmed'            ? 'bg-green-100 text-green-700' :
+            r.confirmationStatus === 'cancelled'            ? 'bg-red-100 text-red-600' :
+            r.confirmationStatus === 'reschedule-requested' ? 'bg-amber-100 text-amber-700' : ''
+          }`}>
+            {r.confirmationStatus === 'confirmed'            ? '✓ Tenant confirmed' :
+             r.confirmationStatus === 'cancelled'            ? '✗ Tenant cancelled' :
+             r.confirmationStatus === 'reschedule-requested' ? `⟳ Reschedule requested${r.rescheduleDate ? ` — ${r.rescheduleDate} ${r.rescheduleTime || ''}` : ''}` : ''}
+          </span>
+        )}
+      </div>
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>

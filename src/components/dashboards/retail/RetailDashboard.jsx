@@ -12,8 +12,11 @@ import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Trash2, Tag, Calendar, Eye, Pencil, Bell, Loader2, X } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
+import SurveysModule from '../../shared/SurveysModule'
 import SetupChecklist from '../../shared/SetupChecklist'
+import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
+import { fmtDate } from '../../../utils/dates'
 
 // ── Shared layout helpers ───────────────────────────────────────────────────
 function PageHead({ title, subtitle, action }) {
@@ -152,7 +155,7 @@ function Customers() {
     { key: 'name', label: 'Name' },
     { key: 'phone', label: 'Phone' },
     { key: 'email', label: 'Email' },
-    { key: 'birthday', label: 'Birthday' },
+    { key: 'birthday', label: 'Birthday', render: r => fmtDate(r.birthday) },
     { key: 'tags', label: 'Tags', render: r => (r.tags ?? []).map(t => (
       <span key={t} className="mr-1 rounded-full bg-primary-light px-2 py-0.5 text-[11px] font-semibold text-primary">{t}</span>
     ))},
@@ -316,7 +319,8 @@ function Appointments() {
     setSendingId(appt.id)
     try {
       const fn = httpsCallable(functions, 'sendSMS')
-      const msg = `Reminder: ${appt.customer}, you have an appointment on ${appt.date} at ${appt.time}${appt.service ? ` for ${appt.service}` : ''}. Reply to reschedule.`
+      const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
+      const msg = `Reminder: ${appt.customer}, you have an appointment on ${appt.date} at ${appt.time}${appt.service ? ` for ${appt.service}` : ''}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.customerPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), { to: appt.customerPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp() })
@@ -326,15 +330,28 @@ function Appointments() {
   const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-surface-2 text-ink-secondary')
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'time', label: 'Time' },
     { key: 'customer', label: 'Customer' },
     { key: 'service', label: 'Service' },
     { key: 'status', label: 'Status', render: r => (
-      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
-        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
-        {RETAIL_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
-      </select>
+      <div className="space-y-1">
+        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
+          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
+          {RETAIL_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        {r.confirmationStatus && (
+          <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            r.confirmationStatus === 'confirmed'            ? 'bg-green-100 text-green-700' :
+            r.confirmationStatus === 'cancelled'            ? 'bg-red-100 text-red-600' :
+            r.confirmationStatus === 'reschedule-requested' ? 'bg-amber-100 text-amber-700' : ''
+          }`}>
+            {r.confirmationStatus === 'confirmed'            ? '✓ Customer confirmed' :
+             r.confirmationStatus === 'cancelled'            ? '✗ Customer cancelled' :
+             r.confirmationStatus === 'reschedule-requested' ? '⟳ Reschedule requested' : ''}
+          </span>
+        )}
+      </div>
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -349,9 +366,16 @@ function Appointments() {
 
   return (
     <div className="space-y-4">
-      <PageHead title="Appointments" subtitle="Bookings and scheduling"
-        action={<AddButton onClick={() => { setForm({ customerId: '', date: new Date().toISOString().slice(0, 10), time: '', service: '', duration: '60', status: 'Scheduled', notes: '' }); setOpen(true) }}>Book Appointment</AddButton>} />
-      <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
+      <AppointmentCalendar
+        appointments={appointments}
+        onSlotClick={(ds, h) => { setForm(f => ({ ...f, date: ds, time: `${String(h).padStart(2, '0')}:00` })); setOpen(true) }}
+        onApptClick={() => {}}
+        listColumns={cols}
+        title="Appointments"
+        subtitle="Bookings and scheduling"
+        headerAction={<AddButton onClick={() => { setForm({ customerId: '', date: new Date().toISOString().slice(0, 10), time: '', service: '', duration: '60', status: 'Scheduled', notes: '' }); setOpen(true) }}>Book Appointment</AddButton>}
+        emptyMessage="No appointments yet."
+      />
       <Modal open={open} onClose={() => setOpen(false)} title="Book Appointment">
         <div className="space-y-4">
           <Field label="Customer" select value={form.customerId} onChange={e => setForm(f => ({ ...f, customerId: e.target.value }))}>
@@ -408,60 +432,6 @@ function Messages() {
   )
 }
 
-// ── Surveys ───────────────────────────────────────────────────────────────────
-function Surveys() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const surveys = useCollection(uid ? `users/${uid}/surveys` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', questions: [''] })
-  function addQ() { setForm(f => ({ ...f, questions: [...f.questions, ''] })) }
-  function updateQ(i, v) { setForm(f => { const q = [...f.questions]; q[i] = v; return { ...f, questions: q } }) }
-  function removeQ(i) { setForm(f => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })) }
-  async function save() {
-    if (!uid || !form.title) return
-    await addDoc(collection(db, 'users', uid, 'surveys'), { ...form, questions: form.questions.filter(q => q.trim()), status: 'Draft', responses: 0, createdAt: serverTimestamp() })
-    setForm({ title: '', description: '', questions: [''] }); setOpen(false)
-  }
-  const statusColor = s => ({ Draft: 'bg-gray-100 text-gray-600', Active: 'bg-green-100 text-green-700', Closed: 'bg-amber-100 text-amber-700' }[s] ?? '')
-  const cols = [
-    { key: 'title', label: 'Survey' },
-    { key: 'questions', label: 'Questions', render: r => `${(r.questions || []).length}` },
-    { key: 'responses', label: 'Responses', render: r => r.responses ?? 0 },
-    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status || 'Draft'}</span> },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex gap-1">
-        {r.status !== 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Active' }) }} className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Activate</button>}
-        {r.status === 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Closed' }) }} className="rounded px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50">Close</button>}
-        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this survey? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'surveys', r.id)) }} className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-      </div>
-    )},
-  ]
-  return (
-    <div className="space-y-4">
-      <PageHead title="Surveys" subtitle="Collect feedback from customers" action={<AddButton onClick={() => setOpen(true)}>New Survey</AddButton>} />
-      <DataTable columns={cols} data={surveys} emptyMessage="No surveys yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Survey" size="lg">
-        <div className="space-y-4">
-          <Field label="Survey Title *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-          <Field label="Description" textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-          <div>
-            <p className="mb-2 text-xs font-semibold text-ink-secondary">Questions</p>
-            {form.questions.map((q, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <input value={q} onChange={e => updateQ(i, e.target.value)} placeholder={`Question ${i + 1}`}
-                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
-                {form.questions.length > 1 && <button onClick={() => removeQ(i)} className="text-red-400 hover:text-red-600"><X size={15} /></button>}
-              </div>
-            ))}
-            <button onClick={addQ} className="text-xs font-semibold text-primary hover:underline">+ Add question</button>
-          </div>
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Create Survey</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
 
 // ── Opt-In ────────────────────────────────────────────────────────────────────
 function OptIn() {
@@ -518,7 +488,7 @@ export default function RetailDashboard() {
         <Route path="appointments" element={<Appointments />} />
         <Route path="messages" element={<Messages />} />
         <Route path="weekly-deals" element={<WeeklyDeals />} />
-        <Route path="surveys" element={<Surveys />} />
+        <Route path="surveys" element={<SurveysModule industry="retail" />} />
         <Route path="optin" element={<OptIn />} />
         <Route path="campaigns" element={<CampaignsModule industry="retail" />} />
         <Route path="profile" element={<ProfilePage industry="retail" />} />

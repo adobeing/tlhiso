@@ -2,10 +2,14 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { PrivateRoute, ActiveUserRoute, IndustryRoute, SuperAdminRoute } from './guards'
 import LandingPage from '../components/landing/LandingPage'
 import LegalPage from '../components/landing/LegalPage'
+import SurveyPage from '../components/public/SurveyPage'
+import PatientIntakePage from '../components/public/PatientIntakePage'
+import AppointmentResponsePage from '../components/public/AppointmentResponsePage'
 import LoginPage from '../components/auth/LoginPage'
 import RegisterPage from '../components/auth/RegisterPage'
 import ForgotPasswordPage from '../components/auth/ForgotPasswordPage'
 import PendingActivationPage from '../components/auth/PendingActivationPage'
+import CheckoutPage from '../components/auth/CheckoutPage'
 import B2BDashboard from '../components/dashboards/b2b/B2BDashboard'
 import MedicalDashboard from '../components/dashboards/medical/MedicalDashboard'
 import PropertyDashboard from '../components/dashboards/property/PropertyDashboard'
@@ -17,6 +21,9 @@ export default function AppRoutes() {
     <Routes>
       {/* Public */}
       <Route path="/" element={<LandingPage />} />
+      <Route path="/survey/:userId/:surveyId" element={<SurveyPage />} />
+      <Route path="/intake/:userId" element={<PatientIntakePage />} />
+      <Route path="/appt/:userId/:appointmentId" element={<AppointmentResponsePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -26,6 +33,8 @@ export default function AppRoutes() {
       {/* Pending activation */}
       <Route element={<PrivateRoute />}>
         <Route path="/pending-activation" element={<PendingActivationPage />} />
+        <Route path="/checkout" element={<CheckoutPage />} />
+        <Route path="/checkout/complete" element={<CheckoutPage />} />
       </Route>
 
       {/* Industry dashboards */}

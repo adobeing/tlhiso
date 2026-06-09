@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Super admin has broad read access (check custom claim)
     function isSuperAdmin() {
       return request.auth != null && (
         request.auth.token.email == 'admin@adobeing.com' ||
@@ -10,19 +9,56 @@ service cloud.firestore {
       );
     }
 
-    // Each user can only access their own documents
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      allow read: if isSuperAdmin();
-      allow write: if isSuperAdmin();
+    // ── Public survey access (no login required) ──────────────────────────────
+    // Must be declared before the catch-all /{subcollection}/{docId} below
+    // so the more-specific path takes effect for unauthenticated respondents.
+    match /users/{userId}/surveys/{surveyId} {
+      // Anyone can read an Active survey to fill it out
+      allow read:  if true;
+      // Only the owner (or super admin) can create / update / delete surveys
+      allow write: if request.auth != null &&
+                      (request.auth.uid == userId || isSuperAdmin());
 
-      match /{subcollection}/{docId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-        allow read: if isSuperAdmin();
+      match /responses/{responseId} {
+        // Anyone can submit a response
+        allow create: if true;
+        // Only the owner (or super admin) can read responses
+        allow read:   if request.auth != null &&
+                         (request.auth.uid == userId || isSuperAdmin());
       }
     }
 
-    // Super admin data
+    // ── Public appointment response (confirm / cancel / reschedule) ──────────
+    match /users/{userId}/appointments/{appointmentId} {
+      allow read: if true;
+      // Patient may only update the response fields — not date, time, or status
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['confirmationStatus', 'responseAt',
+                                 'rescheduleDate', 'rescheduleTime', 'rescheduleNote']);
+      allow write: if request.auth != null &&
+                      (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    // ── Public patient intake form submissions ────────────────────────────────
+    match /users/{userId}/patients/{patientId} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null &&
+                                     (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    // ── Per-user data (authenticated access only) ─────────────────────────────
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read:        if isSuperAdmin();
+      allow write:       if isSuperAdmin();
+
+      match /{subcollection}/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read:        if isSuperAdmin();
+      }
+    }
+
+    // ── Super admin data ──────────────────────────────────────────────────────
     match /superadmin/{document=**} {
       allow read, write: if isSuperAdmin();
     }

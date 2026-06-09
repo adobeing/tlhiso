@@ -14,15 +14,17 @@ import { db, storage, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import {
   PlusCircle, Trash2, Mic, Square, Plus, Play, Pause, Search, X, Loader2, FileText, Bell,
-  Download, Mail, Pencil, Save as SaveIcon,
-  User, Calendar, Stethoscope, Activity, Pill, ClipboardList,
+  Download, Mail, Pencil, Eye, Save as SaveIcon, Link2, Copy, Check,
+  User, UserCircle, Calendar, Stethoscope, Activity, Pill, ClipboardList,
   Heart, Thermometer, Droplet, Wind, Gauge, Scale, AlertTriangle, Phone,
   CreditCard, Users, Clock, ChevronLeft, ChevronRight, LayoutList, CalendarDays,
 } from 'lucide-react'
-import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer'
+import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import CampaignsModule from '../../shared/CampaignsModule'
+import SurveysModule from '../../shared/SurveysModule'
 import SettingsPage from '../../shared/SettingsPage'
+import { fmtDate } from '../../../utils/dates'
 
 /* ────────────────────────────────────────────────────────────────────────────
    PDF generation (shared) — uses @react-pdf/renderer's pdf() to build a Blob
@@ -43,6 +45,7 @@ const pdfStyles = StyleSheet.create({
   rxLine: { marginBottom: 2 },
   footer: { position: 'absolute', bottom: 30, left: 40, right: 40, borderTop: '1 solid #E2E8F0', paddingTop: 8, fontSize: 8, color: '#94A3B8' },
   signBlock: { marginTop: 36, borderTop: '1 solid #94A3B8', width: 220, paddingTop: 4 },
+  logo: { width: 44, height: 44, objectFit: 'contain', marginRight: 10 },
 })
 
 function PdfMeta({ items }) {
@@ -71,8 +74,13 @@ function PdfSection({ title, body }) {
 function PdfHeader({ practice, title }) {
   return (
     <View style={pdfStyles.header}>
-      <Text style={pdfStyles.brand}>{practice?.name || 'Tlhiso'}</Text>
-      {practice?.line ? <Text style={pdfStyles.practiceLine}>{practice.line}</Text> : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+        {practice?.logoUrl ? <Image src={practice.logoUrl} style={pdfStyles.logo} /> : null}
+        <View>
+          <Text style={pdfStyles.brand}>{practice?.name || 'Tlhiso'}</Text>
+          {practice?.line ? <Text style={pdfStyles.practiceLine}>{practice.line}</Text> : null}
+        </View>
+      </View>
       <Text style={pdfStyles.docTitle}>{title}</Text>
     </View>
   )
@@ -114,7 +122,7 @@ function ConsultationPDF({ c, practice }) {
         <PdfSection title="Objective" body={c.objective} />
         <PdfSection title="Assessment" body={c.assessment} />
         <PdfSection title="Plan" body={c.plan} />
-        {c.icd10?.length > 0 && (
+        {Array.isArray(c.icd10) && c.icd10.length > 0 && (
           <View>
             <Text style={pdfStyles.sectionTitle}>Diagnosis (ICD-10)</Text>
             {c.icd10.map((d, i) => <Text key={i} style={pdfStyles.rxLine}>{d.code} — {d.desc}</Text>)}
@@ -569,6 +577,46 @@ function Patients() {
   const [medications, setMedications] = useState([])
   const [surgeries, setSurgeries] = useState([])
   const [saving, setSaving] = useState(false)
+  const [shareOpen,  setShareOpen]  = useState(false)
+  const [shareEmail, setShareEmail] = useState('')
+  const [shareBusy,  setShareBusy]  = useState(false)
+  const [shareSent,  setShareSent]  = useState(false)
+  const [copied,     setCopied]     = useState(false)
+
+  const intakeLink = uid ? `${window.location.origin}/intake/${uid}` : ''
+
+  async function emailIntakeLink() {
+    if (!shareEmail || !shareEmail.includes('@')) { alert('Enter a valid email address.'); return }
+    setShareBusy(true)
+    try {
+      const fn = httpsCallable(functions, 'sendEmail')
+      await fn({
+        to: shareEmail,
+        subject: 'Please complete your patient intake form',
+        htmlBody: `<p>Dear Patient,</p>
+<p>Please click the link below to complete your patient intake form before your appointment:</p>
+<p><a href="${intakeLink}" style="color:#0d9488;font-weight:bold;">Complete Patient Intake Form</a></p>
+<p>This form collects your personal and medical details securely. Your information is protected under POPIA.</p>
+<p>If you have any questions, please contact our practice directly.</p>
+<br/><p>Kind regards,<br/>The Practice Team · Powered by Tlhiso</p>`,
+      })
+      await addDoc(collection(db, 'users', uid, 'messages'), {
+        to: shareEmail, type: 'email',
+        subject: 'Patient intake form link',
+        body: intakeLink, module: 'patient-intake', status: 'sent', sentAt: serverTimestamp(),
+      })
+      setShareSent(true)
+      setShareEmail('')
+      setTimeout(() => setShareSent(false), 4000)
+    } catch { alert('Failed to send email. Check SendGrid credentials.') }
+    finally { setShareBusy(false) }
+  }
+
+  function copyLink() {
+    navigator.clipboard.writeText(intakeLink)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
   const SA_ID_RE = /^\d{13}$/
@@ -657,116 +705,201 @@ function Patients() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-bold text-ink">Patients</h2>
-        <button onClick={() => { resetAll(); setOpen(true) }} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-          <PlusCircle size={15} /> Add Patient
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShareOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 transition">
+            <Link2 size={15} /> Share Intake Form
+          </button>
+          <button onClick={() => { resetAll(); setOpen(true) }} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
+            <PlusCircle size={15} /> Add Patient
+          </button>
+        </div>
       </div>
       <DataTable columns={cols} data={patients} emptyMessage="No patients yet." onRowClick={setViewing} />
 
+      {/* Share intake form modal */}
+      <Modal open={shareOpen} onClose={() => { setShareOpen(false); setShareEmail(''); setShareSent(false) }} title="Share Patient Intake Form">
+        <div className="space-y-4">
+          <p className="text-sm text-ink-secondary">
+            Send patients this link to fill in their details before their appointment. Submissions appear instantly in your Patients list.
+          </p>
+
+          {/* Link display + copy */}
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-ink-secondary">Form link</p>
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2.5">
+              <span className="flex-1 truncate font-mono text-xs text-ink">{intakeLink}</span>
+              <button onClick={copyLink}
+                className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Email the link */}
+          <div className="border-t border-border pt-4">
+            <p className="mb-2 text-xs font-semibold text-ink-secondary">Email link to patient</p>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={shareEmail}
+                onChange={e => setShareEmail(e.target.value)}
+                placeholder="patient@email.com"
+                className="flex-1 rounded-xl border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+              <button onClick={emailIntakeLink} disabled={shareBusy || !shareEmail}
+                className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d] disabled:opacity-50 transition">
+                {shareBusy ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                Send
+              </button>
+            </div>
+            {shareSent && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-green-600">
+                <Check size={12} /> Link emailed successfully
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={open} onClose={() => setOpen(false)} title="New Patient" size="xl">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-4">
+          <ReferralFormSection title="Personal Details" icon={User}>
+            <Field label="First Name *" value={form.firstName} onChange={set('firstName')} />
+            <Field label="Last Name *" value={form.lastName} onChange={set('lastName')} />
+            <Field label="Date of Birth" type="date" value={form.dob} onChange={set('dob')} />
+            <Field label="SA ID Number (13 digits)" value={form.idNumber} onChange={set('idNumber')} maxLength={13} />
+            <Field label="Gender" select value={form.gender} onChange={set('gender')}>
+              <option value="">Select…</option>
+              {['Male','Female','Non-binary','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Marital Status" select value={form.maritalStatus} onChange={set('maritalStatus')}>
+              <option value="">Select…</option>
+              {['Single','Married','Divorced','Widowed'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Race (optional — clinical history)" select value={form.race} onChange={set('race')}>
+              <option value="">Select…</option>
+              {['African','Coloured','Indian','White','Other','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Home Language" value={form.homeLanguage} onChange={set('homeLanguage')} />
+            <Field label="Blood Type" select value={form.bloodType} onChange={set('bloodType')}>
+              <option value="">Unknown</option>
+              {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+          </ReferralFormSection>
 
-          <SectionTitle>Personal Details</SectionTitle>
-          <Field label="First Name *" value={form.firstName} onChange={set('firstName')} />
-          <Field label="Last Name *" value={form.lastName} onChange={set('lastName')} />
-          <Field label="Date of Birth" type="date" value={form.dob} onChange={set('dob')} />
-          <Field label="SA ID Number (13 digits)" value={form.idNumber} onChange={set('idNumber')} maxLength={13} />
-          <Field label="Gender" select value={form.gender} onChange={set('gender')}>
-            <option value="">Select…</option>
-            {['Male','Female','Non-binary','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Marital Status" select value={form.maritalStatus} onChange={set('maritalStatus')}>
-            <option value="">Select…</option>
-            {['Single','Married','Divorced','Widowed'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Race (optional — clinical history)" select value={form.race} onChange={set('race')}>
-            <option value="">Select…</option>
-            {['African','Coloured','Indian','White','Other','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Home Language" value={form.homeLanguage} onChange={set('homeLanguage')} />
-          <Field label="Blood Type" select value={form.bloodType} onChange={set('bloodType')}>
-            <option value="">Unknown</option>
-            {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g=><option key={g}>{g}</option>)}
-          </Field>
+          <ReferralFormSection title="Contact & Next of Kin" icon={Phone}>
+            <Field label="Phone (+27…)" value={form.phone} onChange={set('phone')} />
+            <Field label="Email" type="email" value={form.email} onChange={set('email')} />
+            <div className="col-span-2"><Field label="Physical Address" textarea value={form.address} onChange={set('address')} /></div>
+            <Field label="Next of Kin Name" value={form.nextOfKinName} onChange={set('nextOfKinName')} />
+            <Field label="Next of Kin Relationship" value={form.nextOfKinRelationship} onChange={set('nextOfKinRelationship')} />
+            <Field label="Next of Kin Phone" value={form.nextOfKinPhone} onChange={set('nextOfKinPhone')} />
+          </ReferralFormSection>
 
-          <SectionTitle>Contact & Next of Kin</SectionTitle>
-          <Field label="Phone (+27…)" value={form.phone} onChange={set('phone')} />
-          <Field label="Email" type="email" value={form.email} onChange={set('email')} />
-          <div className="col-span-2">
-            <Field label="Physical Address" textarea value={form.address} onChange={set('address')} />
+          <ReferralFormSection title="Medical Aid" icon={CreditCard}>
+            <Field label="Medical Aid Name" value={form.medicalAid} onChange={set('medicalAid')} />
+            <Field label="Plan / Option" value={form.planName} onChange={set('planName')} />
+            <Field label="Member Number" value={form.memberNumber} onChange={set('memberNumber')} />
+            <Field label="Principal Member Name" value={form.principalMember} onChange={set('principalMember')} />
+            <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
+          </ReferralFormSection>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Dependants</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {dependants.map((d, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
+                  <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
+                  <div className="col-span-2"><Field label="Dep. Code" value={d.dependantCode} onChange={e => updateRow(dependants,setDependants)(i,'dependantCode',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(dependants,setDependants)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setDependants([...dependants, emptyDependant()])}>Add Dependant</AddBtn>
+            </div>
           </div>
-          <Field label="Next of Kin Name" value={form.nextOfKinName} onChange={set('nextOfKinName')} />
-          <Field label="Next of Kin Relationship" value={form.nextOfKinRelationship} onChange={set('nextOfKinRelationship')} />
-          <Field label="Next of Kin Phone" value={form.nextOfKinPhone} onChange={set('nextOfKinPhone')} />
 
-          <SectionTitle>Medical Aid</SectionTitle>
-          <Field label="Medical Aid Name" value={form.medicalAid} onChange={set('medicalAid')} />
-          <Field label="Plan / Option" value={form.planName} onChange={set('planName')} />
-          <Field label="Member Number" value={form.memberNumber} onChange={set('memberNumber')} />
-          <Field label="Principal Member Name" value={form.principalMember} onChange={set('principalMember')} />
-          <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
-
-          <SectionTitle>Dependants</SectionTitle>
-          {dependants.map((d, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
-              <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
-              <div className="col-span-2"><Field label="Dep. Code" value={d.dependantCode} onChange={e => updateRow(dependants,setDependants)(i,'dependantCode',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(dependants,setDependants)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic Conditions (ICD-10)</h4>
             </div>
-          ))}
-          <AddBtn onClick={() => setDependants([...dependants, emptyDependant()])}>Add Dependant</AddBtn>
-
-          <SectionTitle>Chronic Conditions (ICD-10)</SectionTitle>
-          {conditions.map((c, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
-              <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+            <div className="space-y-2 p-4">
+              {conditions.map((c, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
+                  <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setConditions([...conditions, emptyCondition()])}>Add Condition</AddBtn>
             </div>
-          ))}
-          <AddBtn onClick={() => setConditions([...conditions, emptyCondition()])}>Add Condition</AddBtn>
-
-          <SectionTitle>Chronic & Current Medication</SectionTitle>
-          {medications.map((m, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(medications,setMedications)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-            </div>
-          ))}
-          <AddBtn onClick={() => setMedications([...medications, emptyMedication()])}>Add Medication</AddBtn>
-
-          <SectionTitle>Allergies</SectionTitle>
-          {allergies.map((a, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
-              <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
-                <option value="">Select…</option>{['Mild','Moderate','Severe','Anaphylaxis'].map(s=><option key={s}>{s}</option>)}
-              </Field></div>
-              <button type="button" onClick={() => removeRow(allergies,setAllergies)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-            </div>
-          ))}
-          <AddBtn onClick={() => setAllergies([...allergies, emptyAllergy()])}>Add Allergy</AddBtn>
-
-          <SectionTitle>Surgical History</SectionTitle>
-          {surgeries.map((s, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(surgeries,setSurgeries)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-            </div>
-          ))}
-          <AddBtn onClick={() => setSurgeries([...surgeries, emptySurgery()])}>Add Surgery</AddBtn>
-
-          <SectionTitle>Additional Notes</SectionTitle>
-          <div className="col-span-2">
-            <Field label="Clinical Notes" textarea value={form.notes} onChange={set('notes')} />
           </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic & Current Medication</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {medications.map((m, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(medications,setMedications)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setMedications([...medications, emptyMedication()])}>Add Medication</AddBtn>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><AlertTriangle size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Allergies</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {allergies.map((a, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
+                  <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
+                    <option value="">Select…</option>{['Mild','Moderate','Severe','Anaphylaxis'].map(s=><option key={s}>{s}</option>)}
+                  </Field></div>
+                  <button type="button" onClick={() => removeRow(allergies,setAllergies)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setAllergies([...allergies, emptyAllergy()])}>Add Allergy</AddBtn>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Surgical History</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {surgeries.map((s, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(surgeries,setSurgeries)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setSurgeries([...surgeries, emptySurgery()])}>Add Surgery</AddBtn>
+            </div>
+          </div>
+
+          <ReferralFormSection title="Additional Notes" icon={FileText}>
+            <div className="col-span-2"><Field label="Clinical Notes" textarea value={form.notes} onChange={set('notes')} /></div>
+          </ReferralFormSection>
         </div>
 
         <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
@@ -776,96 +909,143 @@ function Patients() {
 
       {/* Edit patient modal */}
       <Modal open={!!editing} onClose={() => { setEditing(null); resetAll() }} title="Edit Patient" size="xl">
-        <div className="grid grid-cols-2 gap-4">
-          <SectionTitle>Personal Details</SectionTitle>
-          <Field label="First Name *" value={form.firstName} onChange={set('firstName')} />
-          <Field label="Last Name *" value={form.lastName} onChange={set('lastName')} />
-          <Field label="Date of Birth" type="date" value={form.dob} onChange={set('dob')} />
-          <Field label="SA ID Number (13 digits)" value={form.idNumber} onChange={set('idNumber')} maxLength={13} />
-          <Field label="Gender" select value={form.gender} onChange={set('gender')}>
-            <option value="">Select…</option>
-            {['Male','Female','Non-binary','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Marital Status" select value={form.maritalStatus} onChange={set('maritalStatus')}>
-            <option value="">Select…</option>
-            {['Single','Married','Divorced','Widowed'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Race (optional — clinical history)" select value={form.race} onChange={set('race')}>
-            <option value="">Select…</option>
-            {['African','Coloured','Indian','White','Other','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <Field label="Home Language" value={form.homeLanguage} onChange={set('homeLanguage')} />
-          <Field label="Blood Type" select value={form.bloodType} onChange={set('bloodType')}>
-            <option value="">Unknown</option>
-            {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g=><option key={g}>{g}</option>)}
-          </Field>
-          <SectionTitle>Contact & Next of Kin</SectionTitle>
-          <Field label="Phone (+27…)" value={form.phone} onChange={set('phone')} />
-          <Field label="Email" type="email" value={form.email} onChange={set('email')} />
-          <div className="col-span-2"><Field label="Physical Address" textarea value={form.address} onChange={set('address')} /></div>
-          <Field label="Next of Kin Name" value={form.nextOfKinName} onChange={set('nextOfKinName')} />
-          <Field label="Next of Kin Relationship" value={form.nextOfKinRelationship} onChange={set('nextOfKinRelationship')} />
-          <Field label="Next of Kin Phone" value={form.nextOfKinPhone} onChange={set('nextOfKinPhone')} />
-          <SectionTitle>Medical Aid</SectionTitle>
-          <Field label="Medical Aid Name" value={form.medicalAid} onChange={set('medicalAid')} />
-          <Field label="Plan / Option" value={form.planName} onChange={set('planName')} />
-          <Field label="Member Number" value={form.memberNumber} onChange={set('memberNumber')} />
-          <Field label="Principal Member Name" value={form.principalMember} onChange={set('principalMember')} />
-          <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
-          <SectionTitle>Dependants</SectionTitle>
-          {dependants.map((d, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
-              <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
-              <div className="col-span-2"><Field label="Dep. Code" value={d.dependantCode} onChange={e => updateRow(dependants,setDependants)(i,'dependantCode',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(dependants,setDependants)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+        <div className="space-y-4">
+          <ReferralFormSection title="Personal Details" icon={User}>
+            <Field label="First Name *" value={form.firstName} onChange={set('firstName')} />
+            <Field label="Last Name *" value={form.lastName} onChange={set('lastName')} />
+            <Field label="Date of Birth" type="date" value={form.dob} onChange={set('dob')} />
+            <Field label="SA ID Number (13 digits)" value={form.idNumber} onChange={set('idNumber')} maxLength={13} />
+            <Field label="Gender" select value={form.gender} onChange={set('gender')}>
+              <option value="">Select…</option>
+              {['Male','Female','Non-binary','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Marital Status" select value={form.maritalStatus} onChange={set('maritalStatus')}>
+              <option value="">Select…</option>
+              {['Single','Married','Divorced','Widowed'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Race (optional — clinical history)" select value={form.race} onChange={set('race')}>
+              <option value="">Select…</option>
+              {['African','Coloured','Indian','White','Other','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+            <Field label="Home Language" value={form.homeLanguage} onChange={set('homeLanguage')} />
+            <Field label="Blood Type" select value={form.bloodType} onChange={set('bloodType')}>
+              <option value="">Unknown</option>
+              {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g=><option key={g}>{g}</option>)}
+            </Field>
+          </ReferralFormSection>
+
+          <ReferralFormSection title="Contact & Next of Kin" icon={Phone}>
+            <Field label="Phone (+27…)" value={form.phone} onChange={set('phone')} />
+            <Field label="Email" type="email" value={form.email} onChange={set('email')} />
+            <div className="col-span-2"><Field label="Physical Address" textarea value={form.address} onChange={set('address')} /></div>
+            <Field label="Next of Kin Name" value={form.nextOfKinName} onChange={set('nextOfKinName')} />
+            <Field label="Next of Kin Relationship" value={form.nextOfKinRelationship} onChange={set('nextOfKinRelationship')} />
+            <Field label="Next of Kin Phone" value={form.nextOfKinPhone} onChange={set('nextOfKinPhone')} />
+          </ReferralFormSection>
+
+          <ReferralFormSection title="Medical Aid" icon={CreditCard}>
+            <Field label="Medical Aid Name" value={form.medicalAid} onChange={set('medicalAid')} />
+            <Field label="Plan / Option" value={form.planName} onChange={set('planName')} />
+            <Field label="Member Number" value={form.memberNumber} onChange={set('memberNumber')} />
+            <Field label="Principal Member Name" value={form.principalMember} onChange={set('principalMember')} />
+            <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
+          </ReferralFormSection>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Dependants</h4>
             </div>
-          ))}
-          <AddBtn onClick={() => setDependants([...dependants, emptyDependant()])}>Add Dependant</AddBtn>
-          <SectionTitle>Chronic Conditions (ICD-10)</SectionTitle>
-          {conditions.map((c, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
-              <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+            <div className="space-y-2 p-4">
+              {dependants.map((d, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
+                  <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
+                  <div className="col-span-2"><Field label="Dep. Code" value={d.dependantCode} onChange={e => updateRow(dependants,setDependants)(i,'dependantCode',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(dependants,setDependants)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setDependants([...dependants, emptyDependant()])}>Add Dependant</AddBtn>
             </div>
-          ))}
-          <AddBtn onClick={() => setConditions([...conditions, emptyCondition()])}>Add Condition</AddBtn>
-          <SectionTitle>Chronic & Current Medication</SectionTitle>
-          {medications.map((m, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(medications,setMedications)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic Conditions (ICD-10)</h4>
             </div>
-          ))}
-          <AddBtn onClick={() => setMedications([...medications, emptyMedication()])}>Add Medication</AddBtn>
-          <SectionTitle>Allergies</SectionTitle>
-          {allergies.map((a, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
-              <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
-                <option value="">Select…</option>{['Mild','Moderate','Severe','Anaphylaxis'].map(s=><option key={s}>{s}</option>)}
-              </Field></div>
-              <button type="button" onClick={() => removeRow(allergies,setAllergies)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+            <div className="space-y-2 p-4">
+              {conditions.map((c, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
+                  <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setConditions([...conditions, emptyCondition()])}>Add Condition</AddBtn>
             </div>
-          ))}
-          <AddBtn onClick={() => setAllergies([...allergies, emptyAllergy()])}>Add Allergy</AddBtn>
-          <SectionTitle>Surgical History</SectionTitle>
-          {surgeries.map((s, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
-              <button type="button" onClick={() => removeRow(surgeries,setSurgeries)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic & Current Medication</h4>
             </div>
-          ))}
-          <AddBtn onClick={() => setSurgeries([...surgeries, emptySurgery()])}>Add Surgery</AddBtn>
-          <SectionTitle>Additional Notes</SectionTitle>
-          <div className="col-span-2"><Field label="Clinical Notes" textarea value={form.notes} onChange={set('notes')} /></div>
+            <div className="space-y-2 p-4">
+              {medications.map((m, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(medications,setMedications)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setMedications([...medications, emptyMedication()])}>Add Medication</AddBtn>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><AlertTriangle size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Allergies</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {allergies.map((a, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
+                  <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
+                    <option value="">Select…</option>{['Mild','Moderate','Severe','Anaphylaxis'].map(s=><option key={s}>{s}</option>)}
+                  </Field></div>
+                  <button type="button" onClick={() => removeRow(allergies,setAllergies)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setAllergies([...allergies, emptyAllergy()])}>Add Allergy</AddBtn>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Surgical History</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {surgeries.map((s, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
+                  <button type="button" onClick={() => removeRow(surgeries,setSurgeries)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <AddBtn onClick={() => setSurgeries([...surgeries, emptySurgery()])}>Add Surgery</AddBtn>
+            </div>
+          </div>
+
+          <ReferralFormSection title="Additional Notes" icon={FileText}>
+            <div className="col-span-2"><Field label="Clinical Notes" textarea value={form.notes} onChange={set('notes')} /></div>
+          </ReferralFormSection>
         </div>
         <button onClick={saveEdit} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
           {saving ? 'Saving…' : 'Save Changes'}
@@ -876,19 +1056,48 @@ function Patients() {
       <Modal open={!!viewing} onClose={() => setViewing(null)} title="Patient Record" size="xl">
         {viewing && (
           <div className="text-sm">
-            <RecordHeader
-              name={`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim()}
-              subtitle={[viewing.gender, viewing.dob && `DOB ${viewing.dob}`].filter(Boolean).join(' · ') || 'Patient'}
-              status={viewing.bloodType ? `Blood ${viewing.bloodType}` : null}
-              statusTone="red"
-              meta={[
-                { icon: CreditCard, value: viewing.idNumber, label: 'ID' },
-                { icon: Phone, value: viewing.phone },
-                { icon: Mail, value: viewing.email },
-              ]}
-            />
+            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
+                    {initials(`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim())}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold leading-tight text-ink">{`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim() || '—'}</h3>
+                    <p className="text-xs text-ink-secondary">{[viewing.gender, viewing.dob && `DOB ${fmtDate(viewing.dob)}`].filter(Boolean).join(' · ') || 'Patient'}</p>
+                  </div>
+                </div>
+                {viewing.bloodType && <StatusPill label={`Blood ${viewing.bloodType}`} tone="red" />}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-5 text-xs">
+                {viewing.idNumber && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.idNumber}</p>
+                  </div>
+                )}
+                {viewing.phone && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Phone</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.phone}</p>
+                  </div>
+                )}
+                {viewing.email && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Email</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.email}</p>
+                  </div>
+                )}
+                {viewing.medicalAid && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Medical Aid</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.medicalAid}</p>
+                  </div>
+                )}
+              </div>
+            </div>
 
-            {viewing.allergies?.length > 0 && (
+            {Array.isArray(viewing.allergies) && viewing.allergies.length > 0 && (
               <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
                 <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
                 <div>
@@ -899,40 +1108,66 @@ function Patients() {
             )}
 
             <div className="space-y-4">
-              <Card icon={User} title="Personal & Contact">
-                <DetailGrid>
-                  <Detail label="Home Language" value={viewing.homeLanguage} />
-                  <Detail label="Marital Status" value={viewing.maritalStatus} />
-                  <Detail label="Race" value={viewing.race} />
-                  <Detail label="Phone" value={viewing.phone} />
-                </DetailGrid>
-                <Detail label="Physical Address" value={viewing.address} block />
-              </Card>
+              <div className="overflow-hidden rounded-xl border border-border">
+                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><User size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Personal & Contact</h4>
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-border/70">
+                  <ReferralField label="Home Language" value={viewing.homeLanguage} />
+                  <ReferralField label="Marital Status" value={viewing.maritalStatus} />
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                  <ReferralField label="Race" value={viewing.race} />
+                  <ReferralField label="Phone" value={viewing.phone} />
+                </div>
+                {viewing.address && (
+                  <div className="border-t border-border/70">
+                    <ReferralField label="Physical Address" value={viewing.address} full />
+                  </div>
+                )}
+              </div>
 
               {(viewing.nextOfKinName || viewing.nextOfKinPhone) && (
-                <Card icon={Users} title="Next of Kin">
-                  <DetailGrid>
-                    <Detail label="Name" value={viewing.nextOfKinName} />
-                    <Detail label="Relationship" value={viewing.nextOfKinRelationship} />
-                    <Detail label="Phone" value={viewing.nextOfKinPhone} />
-                  </DetailGrid>
-                </Card>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Next of Kin</h4>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="Name" value={viewing.nextOfKinName} />
+                    <ReferralField label="Relationship" value={viewing.nextOfKinRelationship} />
+                  </div>
+                  <div className="border-t border-border/70">
+                    <ReferralField label="Phone" value={viewing.nextOfKinPhone} full />
+                  </div>
+                </div>
               )}
 
               {(viewing.medicalAid || viewing.memberNumber) && (
-                <Card icon={CreditCard} title="Medical Aid">
-                  <DetailGrid>
-                    <Detail label="Scheme" value={viewing.medicalAid} />
-                    <Detail label="Plan / Option" value={viewing.planName} />
-                    <Detail label="Member Number" value={viewing.memberNumber} />
-                    <Detail label="Principal Member" value={viewing.principalMember} />
-                    <Detail label="Dependant Code" value={viewing.dependantCode} />
-                  </DetailGrid>
-                </Card>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><CreditCard size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Medical Aid</h4>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="Scheme" value={viewing.medicalAid} />
+                    <ReferralField label="Plan / Option" value={viewing.planName} />
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                    <ReferralField label="Member Number" value={viewing.memberNumber} />
+                    <ReferralField label="Principal Member" value={viewing.principalMember} />
+                  </div>
+                  {viewing.dependantCode && (
+                    <div className="border-t border-border/70">
+                      <ReferralField label="Dependant Code" value={viewing.dependantCode} full />
+                    </div>
+                  )}
+                </div>
               )}
 
-              {viewing.dependants?.length > 0 && (
-                <Card icon={Users} title="Dependants">
+              {Array.isArray(viewing.dependants) && viewing.dependants.length > 0 && (
+                <RecordViewSection title="Dependants" icon={Users}>
                   <div className="space-y-1.5">
                     {viewing.dependants.map((d, i) => (
                       <div key={i} className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2">
@@ -941,17 +1176,17 @@ function Patients() {
                       </div>
                     ))}
                   </div>
-                </Card>
+                </RecordViewSection>
               )}
 
-              {viewing.chronicConditions?.length > 0 && (
-                <Card icon={Activity} title="Chronic Conditions">
+              {Array.isArray(viewing.chronicConditions) && viewing.chronicConditions.length > 0 && (
+                <RecordViewSection title="Chronic Conditions" icon={Activity}>
                   <Chips items={viewing.chronicConditions.map(c => `${c.condition}${c.icd10 ? ` (${c.icd10})` : ''}`)} />
-                </Card>
+                </RecordViewSection>
               )}
 
-              {viewing.currentMedication?.length > 0 && (
-                <Card icon={Pill} title="Current Medication">
+              {Array.isArray(viewing.currentMedication) && viewing.currentMedication.length > 0 && (
+                <RecordViewSection title="Current Medication" icon={Pill}>
                   <div className="space-y-1.5">
                     {viewing.currentMedication.map((m, i) => (
                       <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
@@ -960,11 +1195,11 @@ function Patients() {
                       </div>
                     ))}
                   </div>
-                </Card>
+                </RecordViewSection>
               )}
 
-              {viewing.surgicalHistory?.length > 0 && (
-                <Card icon={ClipboardList} title="Surgical History">
+              {Array.isArray(viewing.surgicalHistory) && viewing.surgicalHistory.length > 0 && (
+                <RecordViewSection title="Surgical History" icon={ClipboardList}>
                   <div className="space-y-1.5">
                     {viewing.surgicalHistory.map((s, i) => (
                       <div key={i} className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2">
@@ -973,13 +1208,13 @@ function Patients() {
                       </div>
                     ))}
                   </div>
-                </Card>
+                </RecordViewSection>
               )}
 
               {viewing.notes && (
-                <Card icon={FileText} title="Clinical Notes">
+                <RecordViewSection title="Clinical Notes" icon={FileText}>
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{viewing.notes}</p>
-                </Card>
+                </RecordViewSection>
               )}
             </div>
           </div>
@@ -1009,6 +1244,7 @@ function Consultations() {
 
   const practice = {
     name: profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl: profile?.businessLogoUrl || '',
     line: [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
   }
 
@@ -1024,7 +1260,7 @@ function Consultations() {
     setEditForm({
       ...viewing,
       prescription: viewing.prescription ? [...viewing.prescription] : [],
-      icd10: viewing.icd10 ? [...viewing.icd10] : [],
+      icd10: Array.isArray(viewing.icd10) ? [...viewing.icd10] : [],
     })
     setEditing(true)
   }
@@ -1035,7 +1271,7 @@ function Consultations() {
     setSavingEdit(true)
     try {
       const { id, createdAt, ...payload } = editForm
-      payload.icd10Summary = (payload.icd10 || []).map(c => c.code).join(', ')
+      payload.icd10Summary = (Array.isArray(payload.icd10) ? payload.icd10 : []).map(c => c.code).join(', ')
       await updateDoc(doc(db, 'users', uid, 'consultations', id), payload)
       setViewing({ ...editForm }); setEditing(false)
     } finally { setSavingEdit(false) }
@@ -1180,9 +1416,13 @@ function Consultations() {
     try {
       const fn = httpsCallable(functions, 'transcribeConsultation')
       const res = await fn({ storagePath: audioPath })
-      setTranscript(res.data?.transcript ?? res.data?.data?.transcript ?? '')
-    } catch {
-      setTranscript('Transcription failed — check the transcribeConsultation Cloud Function and AssemblyAI key.')
+      if (res.data?.success === false) {
+        setTranscript(`Transcription failed: ${res.data.error || 'Unknown error'}`)
+      } else {
+        setTranscript(res.data?.transcript ?? '')
+      }
+    } catch (e) {
+      setTranscript(`Transcription failed: ${e?.message || 'Unknown error'}`)
     } finally { setTranscribing(false) }
   }
 
@@ -1209,7 +1449,7 @@ function Consultations() {
   }
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'patient', label: 'Patient' },
     { key: 'practitioner', label: 'Practitioner' },
     { key: 'chiefComplaint', label: 'Complaint' },
@@ -1234,100 +1474,118 @@ function Consultations() {
 
       {/* New consultation */}
       <Modal open={open} onClose={() => setOpen(false)} title="New Consultation" size="xl">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-4">
+          <ReferralFormSection title="Encounter" icon={Stethoscope}>
+            <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
+              <option value="">Select patient…</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </Field>
+            <Field label="Practitioner" select value={form.practitioner} onChange={set('practitioner')}>
+              <option value="">Select…</option>
+              {practitioners.map(p => <option key={p.id} value={p.name}>{p.name}{p.speciality ? ` — ${p.speciality}` : ''}</option>)}
+            </Field>
+            <Field label="Date" type="date" value={form.date} onChange={set('date')} />
+            <Field label="Chief Complaint" value={form.chiefComplaint} onChange={set('chiefComplaint')} placeholder="Reason for visit" />
+          </ReferralFormSection>
 
-          <SectionTitle>Encounter</SectionTitle>
-          <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
-            <option value="">Select patient…</option>
-            {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-          </Field>
-          <Field label="Practitioner" select value={form.practitioner} onChange={set('practitioner')}>
-            <option value="">Select…</option>
-            {practitioners.map(p => <option key={p.id} value={p.name}>{p.name}{p.speciality ? ` — ${p.speciality}` : ''}</option>)}
-          </Field>
-          <Field label="Date" type="date" value={form.date} onChange={set('date')} />
-          <Field label="Chief Complaint" value={form.chiefComplaint} onChange={set('chiefComplaint')} placeholder="Reason for visit" />
+          <ReferralFormSection title="Vitals" icon={Activity}>
+            <Field label="Blood Pressure (mmHg)" value={form.bp} onChange={set('bp')} placeholder="120/80" />
+            <Field label="Pulse (bpm)" value={form.pulse} onChange={set('pulse')} />
+            <Field label="Temperature (°C)" value={form.temp} onChange={set('temp')} />
+            <Field label="Respiratory Rate" value={form.resp} onChange={set('resp')} />
+            <Field label="SpO₂ (%)" value={form.spo2} onChange={set('spo2')} />
+            <Field label="Blood Glucose (mmol/L)" value={form.glucose} onChange={set('glucose')} />
+            <Field label="Weight (kg)" value={form.weight} onChange={setWeight} />
+            <Field label="Height (cm)" value={form.height} onChange={setHeight} />
+            <Field label="BMI (auto)" value={form.bmi} readOnly hint="Calculated from weight & height" />
+          </ReferralFormSection>
 
-          <SectionTitle>Vitals</SectionTitle>
-          <Field label="Blood Pressure (mmHg)" value={form.bp} onChange={set('bp')} placeholder="120/80" />
-          <Field label="Pulse (bpm)" value={form.pulse} onChange={set('pulse')} />
-          <Field label="Temperature (°C)" value={form.temp} onChange={set('temp')} />
-          <Field label="Respiratory Rate" value={form.resp} onChange={set('resp')} />
-          <Field label="SpO₂ (%)" value={form.spo2} onChange={set('spo2')} />
-          <Field label="Blood Glucose (mmol/L)" value={form.glucose} onChange={set('glucose')} />
-          <Field label="Weight (kg)" value={form.weight} onChange={setWeight} />
-          <Field label="Height (cm)" value={form.height} onChange={setHeight} />
-          <Field label="BMI (auto)" value={form.bmi} readOnly hint="Calculated from weight & height" />
-
-          <SectionTitle>Voice Note & Transcription</SectionTitle>
-          <div className="col-span-2 rounded-xl bg-surface-2 p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={recording ? stopRecording : startRecording}
-                className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${recording ? 'bg-red-500 text-white animate-pulse' : 'border border-border text-ink-secondary hover:border-primary'}`}>
-                {recording ? <><Square size={14} /> Stop</> : <><Mic size={14} /> Record</>}
-              </button>
-
-              {recording && (
-                <span className="text-xs font-semibold text-red-500">
-                  ● Recording… {String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}
-                </span>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Mic size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Voice Note & Transcription</h4>
+            </div>
+            <div className="p-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" onClick={recording ? stopRecording : startRecording}
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${recording ? 'bg-red-500 text-white animate-pulse' : 'border border-border text-ink-secondary hover:border-primary'}`}>
+                  {recording ? <><Square size={14} /> Stop</> : <><Mic size={14} /> Record</>}
+                </button>
+                {recording && (
+                  <span className="text-xs font-semibold text-red-500">
+                    ● Recording… {String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}
+                  </span>
+                )}
+                {uploadingAudio && <span className="flex items-center gap-1 text-xs text-ink-secondary"><Loader2 size={13} className="animate-spin" /> Saving audio…</span>}
+                {audioUrl && !recording && (
+                  <>
+                    <audio ref={audioElRef} src={audioUrl} onEnded={() => setPlaying(false)} className="hidden" />
+                    <button type="button" onClick={togglePlay}
+                      className="flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-ink-secondary hover:border-primary">
+                      {playing ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
+                    </button>
+                    <button type="button" onClick={runTranscription} disabled={transcribing || uploadingAudio}
+                      className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                      {transcribing ? <><Loader2 size={14} className="animate-spin" /> Transcribing…</> : <><FileText size={14} /> Transcribe</>}
+                    </button>
+                  </>
+                )}
+              </div>
+              {recError && <p className="mt-2 text-xs font-medium text-red-500">{recError}</p>}
+              {audioUrl && !recording && !recError && (
+                <p className="mt-2 text-[11px] text-ink-secondary">Tip: play back to check the audio before transcribing or saving.</p>
               )}
-              {uploadingAudio && <span className="flex items-center gap-1 text-xs text-ink-secondary"><Loader2 size={13} className="animate-spin" /> Saving audio…</span>}
-
-              {audioUrl && !recording && (
-                <>
-                  <audio ref={audioElRef} src={audioUrl} onEnded={() => setPlaying(false)} className="hidden" />
-                  <button type="button" onClick={togglePlay}
-                    className="flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-ink-secondary hover:border-primary">
-                    {playing ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
-                  </button>
-                  <button type="button" onClick={runTranscription} disabled={transcribing || uploadingAudio}
-                    className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-                    {transcribing ? <><Loader2 size={14} className="animate-spin" /> Transcribing…</> : <><FileText size={14} /> Transcribe</>}
-                  </button>
-                </>
+              {transcript && (
+                <div className="mt-3">
+                  <span className="mb-1 block text-xs font-semibold text-ink-secondary">Transcript (editable)</span>
+                  <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
+                    className="h-28 w-full resize-none rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                </div>
               )}
             </div>
-            {recError && <p className="mt-2 text-xs font-medium text-red-500">{recError}</p>}
-            {audioUrl && !recording && !recError && (
-              <p className="mt-2 text-[11px] text-ink-secondary">Tip: play back to check the audio before transcribing or saving.</p>
-            )}
-            {transcript && (
-              <div className="mt-3">
-                <span className="mb-1 block text-xs font-semibold text-ink-secondary">Transcript (editable)</span>
-                <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
-                  className="h-28 w-full resize-none rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
-              </div>
-            )}
           </div>
 
-          <SectionTitle>SOAP Notes</SectionTitle>
-          <div className="col-span-2"><Field label="Subjective — patient's reported symptoms/history" textarea value={form.subjective} onChange={set('subjective')} /></div>
-          <div className="col-span-2"><Field label="Objective — exam findings, observations" textarea value={form.objective} onChange={set('objective')} /></div>
-          <div className="col-span-2"><Field label="Assessment — clinical impression" textarea value={form.assessment} onChange={set('assessment')} /></div>
-          <div className="col-span-2"><Field label="Plan — management, investigations, advice" textarea value={form.plan} onChange={set('plan')} /></div>
+          <ReferralFormSection title="SOAP Notes" icon={FileText}>
+            <div className="col-span-2"><Field label="Subjective — patient's reported symptoms/history" textarea value={form.subjective} onChange={set('subjective')} /></div>
+            <div className="col-span-2"><Field label="Objective — exam findings, observations" textarea value={form.objective} onChange={set('objective')} /></div>
+            <div className="col-span-2"><Field label="Assessment — clinical impression" textarea value={form.assessment} onChange={set('assessment')} /></div>
+            <div className="col-span-2"><Field label="Plan — management, investigations, advice" textarea value={form.plan} onChange={set('plan')} /></div>
+          </ReferralFormSection>
 
-          <SectionTitle>Diagnosis</SectionTitle>
-          <Icd10Picker selected={icd} onChange={setIcd} />
-
-          <SectionTitle>Prescription</SectionTitle>
-          {rx.map((r, i) => (
-            <div key={i} className="col-span-2 grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
-              <div className="col-span-4"><Field label="Medication" value={r.drug} onChange={e => updateRx(i, 'drug', e.target.value)} /></div>
-              <div className="col-span-3"><Field label="Dosage" value={r.dosage} onChange={e => updateRx(i, 'dosage', e.target.value)} placeholder="e.g. 500mg" /></div>
-              <div className="col-span-2"><Field label="Frequency" value={r.frequency} onChange={e => updateRx(i, 'frequency', e.target.value)} placeholder="bd" /></div>
-              <div className="col-span-2"><Field label="Duration" value={r.duration} onChange={e => updateRx(i, 'duration', e.target.value)} placeholder="7 days" /></div>
-              <button type="button" onClick={() => removeRx(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Diagnosis (ICD-10)</h4>
             </div>
-          ))}
-          <button type="button" onClick={() => setRx([...rx, emptyRx()])}
-            className="col-span-2 flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light">
-            <Plus size={13} /> Add Medication
-          </button>
+            <div className="p-4"><Icd10Picker selected={icd} onChange={setIcd} /></div>
+          </div>
 
-          <SectionTitle>Follow-up</SectionTitle>
-          <Field label="Follow-up Date" type="date" value={form.followUpDate} onChange={set('followUpDate')} />
-          <Field label="Follow-up Notes" value={form.followUpNotes} onChange={set('followUpNotes')} />
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Prescription</h4>
+            </div>
+            <div className="space-y-2 p-4">
+              {rx.map((r, i) => (
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                  <div className="col-span-4"><Field label="Medication" value={r.drug} onChange={e => updateRx(i, 'drug', e.target.value)} /></div>
+                  <div className="col-span-3"><Field label="Dosage" value={r.dosage} onChange={e => updateRx(i, 'dosage', e.target.value)} placeholder="e.g. 500mg" /></div>
+                  <div className="col-span-2"><Field label="Frequency" value={r.frequency} onChange={e => updateRx(i, 'frequency', e.target.value)} placeholder="bd" /></div>
+                  <div className="col-span-2"><Field label="Duration" value={r.duration} onChange={e => updateRx(i, 'duration', e.target.value)} placeholder="7 days" /></div>
+                  <button type="button" onClick={() => removeRx(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <button type="button" onClick={() => setRx([...rx, emptyRx()])}
+                className="flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light">
+                <Plus size={13} /> Add Medication
+              </button>
+            </div>
+          </div>
+
+          <ReferralFormSection title="Follow-up" icon={Calendar}>
+            <Field label="Follow-up Date" type="date" value={form.followUpDate} onChange={set('followUpDate')} />
+            <Field label="Follow-up Notes" value={form.followUpNotes} onChange={set('followUpNotes')} />
+          </ReferralFormSection>
         </div>
 
         <button onClick={save} disabled={saving}
@@ -1340,16 +1598,38 @@ function Consultations() {
       <Modal open={!!viewing} onClose={() => { setViewing(null); setEditing(false) }} title={editing ? 'Edit Consultation' : 'Consultation Record'} size="xl">
         {viewing && !editing && (
           <div className="text-sm">
-            <RecordHeader
-              name={viewing.patient}
-              subtitle="Consultation Record"
-              status={viewing.followUpDate ? 'Follow-up set' : null}
-              statusTone="primary"
-              meta={[
-                { icon: Calendar, value: viewing.date, label: 'date' },
-                { icon: Stethoscope, value: viewing.practitioner, label: 'practitioner' },
-              ]}
-            />
+            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
+                    {initials(viewing.patient)}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-ink-secondary">Consultation Record</p>
+                  </div>
+                </div>
+                {viewing.followUpDate && <StatusPill label="Follow-up set" tone="primary" />}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-5 text-xs">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                </div>
+                {viewing.practitioner && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.practitioner}</p>
+                  </div>
+                )}
+                {viewing.chiefComplaint && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Chief Complaint</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.chiefComplaint}</p>
+                  </div>
+                )}
+              </div>
+            </div>
             <Toolbar>
               <ToolbarBtn onClick={startEdit} icon={Pencil}>Edit</ToolbarBtn>
               <ToolbarBtn onClick={() => downloadPdf(viewing)} disabled={downloadingId} loading={downloadingId} icon={Download} primary>
@@ -1358,14 +1638,8 @@ function Consultations() {
             </Toolbar>
 
             <div className="space-y-4">
-              {viewing.chiefComplaint && (
-                <Card icon={ClipboardList} title="Chief Complaint">
-                  <p className="text-sm leading-relaxed text-ink">{viewing.chiefComplaint}</p>
-                </Card>
-              )}
-
               {(viewing.bp || viewing.pulse || viewing.temp || viewing.spo2 || viewing.glucose || viewing.bmi) && (
-                <Card icon={Activity} title="Vitals">
+                <RecordViewSection title="Vitals" icon={Activity}>
                   <VitalsGrid vitals={[
                     { icon: Gauge, label: 'Blood Pressure', value: viewing.bp },
                     { icon: Heart, label: 'Pulse', value: viewing.pulse, unit: 'bpm' },
@@ -1377,26 +1651,32 @@ function Consultations() {
                     { icon: Scale, label: 'Height', value: viewing.height, unit: 'cm' },
                     { icon: Activity, label: 'BMI', value: viewing.bmi },
                   ]} />
-                </Card>
+                </RecordViewSection>
               )}
 
               {(viewing.subjective || viewing.objective || viewing.assessment || viewing.plan) && (
-                <Card icon={FileText} title="SOAP Notes">
-                  <Detail label="Subjective" value={viewing.subjective} block />
-                  <Detail label="Objective" value={viewing.objective} block />
-                  <Detail label="Assessment" value={viewing.assessment} block />
-                  <Detail label="Plan" value={viewing.plan} block />
-                </Card>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">SOAP Notes</h4>
+                  </div>
+                  <div className="divide-y divide-border/70">
+                    {viewing.subjective && <ReferralField label="Subjective" value={viewing.subjective} full />}
+                    {viewing.objective && <ReferralField label="Objective" value={viewing.objective} full />}
+                    {viewing.assessment && <ReferralField label="Assessment" value={viewing.assessment} full />}
+                    {viewing.plan && <ReferralField label="Plan" value={viewing.plan} full />}
+                  </div>
+                </div>
               )}
 
-              {viewing.icd10?.length > 0 && (
-                <Card icon={ClipboardList} title="Diagnosis (ICD-10)">
+              {Array.isArray(viewing.icd10) && viewing.icd10.length > 0 && (
+                <RecordViewSection title="Diagnosis (ICD-10)" icon={ClipboardList}>
                   <Chips items={viewing.icd10.map(c => `${c.code} — ${c.desc}`)} />
-                </Card>
+                </RecordViewSection>
               )}
 
-              {viewing.prescription?.length > 0 && (
-                <Card icon={Pill} title="Prescription">
+              {Array.isArray(viewing.prescription) && viewing.prescription.length > 0 && (
+                <RecordViewSection title="Prescription" icon={Pill}>
                   <div className="space-y-1.5">
                     {viewing.prescription.map((r, i) => (
                       <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
@@ -1405,59 +1685,73 @@ function Consultations() {
                       </div>
                     ))}
                   </div>
-                </Card>
+                </RecordViewSection>
               )}
 
               {viewing.transcript && (
-                <Card icon={Mic} title="Voice Transcript">
+                <RecordViewSection title="Voice Transcript" icon={Mic}>
                   <p className="whitespace-pre-wrap rounded-xl bg-surface-2 p-3 text-sm leading-relaxed text-ink-secondary">{viewing.transcript}</p>
-                </Card>
+                </RecordViewSection>
               )}
 
               {viewing.followUpDate && (
-                <Card icon={Clock} title="Follow-up">
-                  <Detail label="Date" value={viewing.followUpDate} />
-                  <Detail label="Notes" value={viewing.followUpNotes} block />
-                </Card>
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Calendar size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Follow-up</h4>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="Date" value={fmtDate(viewing.followUpDate)} />
+                    <ReferralField label="Notes" value={viewing.followUpNotes} />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
 
         {viewing && editing && editForm && (
-          <div className="grid grid-cols-2 gap-4">
-            <SectionTitle>Encounter</SectionTitle>
-            <Field label="Practitioner" value={editForm.practitioner} onChange={setE('practitioner')} />
-            <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
-            <div className="col-span-2"><Field label="Chief Complaint" value={editForm.chiefComplaint} onChange={setE('chiefComplaint')} /></div>
+          <div className="space-y-4">
+            <ReferralFormSection title="Encounter" icon={Stethoscope}>
+              <Field label="Practitioner" value={editForm.practitioner} onChange={setE('practitioner')} />
+              <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
+              <div className="col-span-2"><Field label="Chief Complaint" value={editForm.chiefComplaint} onChange={setE('chiefComplaint')} /></div>
+            </ReferralFormSection>
 
-            <SectionTitle>Vitals</SectionTitle>
-            <Field label="Blood Pressure" value={editForm.bp} onChange={setE('bp')} />
-            <Field label="Pulse" value={editForm.pulse} onChange={setE('pulse')} />
-            <Field label="Temperature" value={editForm.temp} onChange={setE('temp')} />
-            <Field label="SpO₂" value={editForm.spo2} onChange={setE('spo2')} />
-            <Field label="Glucose" value={editForm.glucose} onChange={setE('glucose')} />
-            <Field label="BMI" value={editForm.bmi} onChange={setE('bmi')} />
+            <ReferralFormSection title="Vitals" icon={Activity}>
+              <Field label="Blood Pressure (mmHg)" value={editForm.bp} onChange={setE('bp')} />
+              <Field label="Pulse (bpm)" value={editForm.pulse} onChange={setE('pulse')} />
+              <Field label="Temperature (°C)" value={editForm.temp} onChange={setE('temp')} />
+              <Field label="SpO₂ (%)" value={editForm.spo2} onChange={setE('spo2')} />
+              <Field label="Blood Glucose (mmol/L)" value={editForm.glucose} onChange={setE('glucose')} />
+              <Field label="BMI" value={editForm.bmi} onChange={setE('bmi')} />
+            </ReferralFormSection>
 
-            <SectionTitle>SOAP Notes</SectionTitle>
-            <div className="col-span-2"><Field label="Subjective" textarea value={editForm.subjective} onChange={setE('subjective')} /></div>
-            <div className="col-span-2"><Field label="Objective" textarea value={editForm.objective} onChange={setE('objective')} /></div>
-            <div className="col-span-2"><Field label="Assessment" textarea value={editForm.assessment} onChange={setE('assessment')} /></div>
-            <div className="col-span-2"><Field label="Plan" textarea value={editForm.plan} onChange={setE('plan')} /></div>
+            <ReferralFormSection title="SOAP Notes" icon={FileText}>
+              <div className="col-span-2"><Field label="Subjective" textarea value={editForm.subjective} onChange={setE('subjective')} /></div>
+              <div className="col-span-2"><Field label="Objective" textarea value={editForm.objective} onChange={setE('objective')} /></div>
+              <div className="col-span-2"><Field label="Assessment" textarea value={editForm.assessment} onChange={setE('assessment')} /></div>
+              <div className="col-span-2"><Field label="Plan" textarea value={editForm.plan} onChange={setE('plan')} /></div>
+            </ReferralFormSection>
 
-            <SectionTitle>Diagnosis</SectionTitle>
-            <Icd10Picker selected={editForm.icd10 || []} onChange={v => setEditForm(f => ({ ...f, icd10: v }))} />
-
-            <SectionTitle>Transcript</SectionTitle>
-            <div className="col-span-2">
-              <Field label="Transcript" textarea value={editForm.transcript || ''} onChange={setE('transcript')} />
+            <div className="overflow-hidden rounded-xl border border-border">
+              <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Diagnosis (ICD-10)</h4>
+              </div>
+              <div className="p-4"><Icd10Picker selected={editForm.icd10 || []} onChange={v => setEditForm(f => ({ ...f, icd10: v }))} /></div>
             </div>
 
-            <SectionTitle>Follow-up</SectionTitle>
-            <Field label="Follow-up Date" type="date" value={editForm.followUpDate} onChange={setE('followUpDate')} />
-            <Field label="Follow-up Notes" value={editForm.followUpNotes} onChange={setE('followUpNotes')} />
+            <ReferralFormSection title="Voice Transcript" icon={Mic}>
+              <div className="col-span-2"><Field label="Transcript" textarea value={editForm.transcript || ''} onChange={setE('transcript')} /></div>
+            </ReferralFormSection>
 
-            <div className="col-span-2 mt-2 flex gap-2">
+            <ReferralFormSection title="Follow-up" icon={Calendar}>
+              <Field label="Follow-up Date" type="date" value={editForm.followUpDate} onChange={setE('followUpDate')} />
+              <Field label="Follow-up Notes" value={editForm.followUpNotes} onChange={setE('followUpNotes')} />
+            </ReferralFormSection>
+
+            <div className="flex gap-2">
               <button onClick={saveEdit} disabled={savingEdit}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
@@ -1975,7 +2269,8 @@ function Appointments() {
     setSendingId(appt.id)
     try {
       const fn  = httpsCallable(functions, 'sendSMS')
-      const msg = `Reminder: ${appt.patient}, you have an appointment on ${appt.date} at ${appt.time}${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Reply to reschedule.`
+      const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
+      const msg = `Reminder: ${appt.patient}, you have an appointment on ${appt.date} at ${appt.time}${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.patientPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), {
@@ -1986,16 +2281,29 @@ function Appointments() {
   }
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'time', label: 'Time' },
     { key: 'patient', label: 'Patient' },
     { key: 'practitioner', label: 'Practitioner' },
     { key: 'appointmentType', label: 'Type' },
     { key: 'status', label: 'Status', render: r => (
-      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
-        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${BADGE_COLORS[r.status] || 'bg-surface-2 text-ink-secondary'}`}>
-        {APPT_STATUS.map(s => <option key={s}>{s}</option>)}
-      </select>
+      <div className="space-y-1">
+        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
+          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${BADGE_COLORS[r.status] || 'bg-surface-2 text-ink-secondary'}`}>
+          {APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        {r.confirmationStatus && (
+          <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            r.confirmationStatus === 'confirmed'            ? 'bg-green-100 text-green-700' :
+            r.confirmationStatus === 'cancelled'            ? 'bg-red-100 text-red-600' :
+            r.confirmationStatus === 'reschedule-requested' ? 'bg-amber-100 text-amber-700' : ''
+          }`}>
+            {r.confirmationStatus === 'confirmed'            ? '✓ Patient confirmed' :
+             r.confirmationStatus === 'cancelled'            ? '✗ Patient cancelled' :
+             r.confirmationStatus === 'reschedule-requested' ? `⟳ Reschedule requested${r.rescheduleDate ? ` — ${r.rescheduleDate} ${r.rescheduleTime || ''}` : ''}` : ''}
+          </span>
+        )}
+      </div>
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -2340,6 +2648,7 @@ function Reports() {
 
   const practice = {
     name: profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl: profile?.businessLogoUrl || '',
     line: [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
   }
 
@@ -2428,7 +2737,7 @@ function Reports() {
   }
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'patient', label: 'Patient' },
     { key: 'reportType', label: 'Type' },
     { key: 'recipient', label: 'Addressed To' },
@@ -2450,33 +2759,34 @@ function Reports() {
       <DataTable columns={cols} data={reports} emptyMessage="No reports yet." onRowClick={openView} />
 
       <Modal open={open} onClose={() => setOpen(false)} title="New Medical Report" size="xl">
-        <div className="grid grid-cols-2 gap-4">
-          <SectionTitle>Report Details</SectionTitle>
-          <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
-            <option value="">Select patient…</option>
-            {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-          </Field>
-          <Field label="Report Type" select value={form.reportType} onChange={set('reportType')}>
-            {REPORT_TYPES.map(t => <option key={t}>{t}</option>)}
-          </Field>
-          <Field label="Practitioner" select value={form.practitioner} onChange={set('practitioner')}>
-            <option value="">Select…</option>
-            {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`.trim()}>{p.title} {p.name}</option>)}
-          </Field>
-          <Field label="Date" type="date" value={form.date} onChange={set('date')} />
-          <div className="col-span-2"><Field label="Addressed To (recipient / employer / insurer)" value={form.recipient} onChange={set('recipient')} /></div>
+        <div className="space-y-4">
+          <ReferralFormSection title="Report Details" icon={FileText}>
+            <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
+              <option value="">Select patient…</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </Field>
+            <Field label="Report Type" select value={form.reportType} onChange={set('reportType')}>
+              {REPORT_TYPES.map(t => <option key={t}>{t}</option>)}
+            </Field>
+            <Field label="Practitioner" select value={form.practitioner} onChange={set('practitioner')}>
+              <option value="">Select…</option>
+              {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`.trim()}>{p.title} {p.name}</option>)}
+            </Field>
+            <Field label="Date" type="date" value={form.date} onChange={set('date')} />
+            <div className="col-span-2"><Field label="Addressed To (recipient / employer / insurer)" value={form.recipient} onChange={set('recipient')} /></div>
+          </ReferralFormSection>
 
-          <SectionTitle>Clinical Content</SectionTitle>
-          <div className="col-span-2"><Field label="Diagnosis" value={form.diagnosis} onChange={set('diagnosis')} /></div>
-          <Field label="ICD-10 Code(s)" value={form.icd10} onChange={set('icd10')} placeholder="e.g. J45.9, I10" />
-          <div className="col-span-2"><Field label="Relevant History" textarea value={form.history} onChange={set('history')} /></div>
-          <div className="col-span-2"><Field label="Clinical Findings" textarea value={form.clinicalFindings} onChange={set('clinicalFindings')} /></div>
-          <div className="col-span-2"><Field label="Treatment / Management" textarea value={form.treatment} onChange={set('treatment')} /></div>
-          <div className="col-span-2"><Field label="Prognosis" textarea value={form.prognosis} onChange={set('prognosis')} /></div>
+          <ReferralFormSection title="Clinical Content" icon={ClipboardList}>
+            <div className="col-span-2"><Field label="Diagnosis" value={form.diagnosis} onChange={set('diagnosis')} /></div>
+            <Field label="ICD-10 Code(s)" value={form.icd10} onChange={set('icd10')} placeholder="e.g. J45.9, I10" />
+            <div className="col-span-2"><Field label="Relevant History" textarea value={form.history} onChange={set('history')} /></div>
+            <div className="col-span-2"><Field label="Clinical Findings" textarea value={form.clinicalFindings} onChange={set('clinicalFindings')} /></div>
+            <div className="col-span-2"><Field label="Treatment / Management" textarea value={form.treatment} onChange={set('treatment')} /></div>
+            <div className="col-span-2"><Field label="Prognosis" textarea value={form.prognosis} onChange={set('prognosis')} /></div>
+          </ReferralFormSection>
 
           {isSickNote && (
-            <>
-              <SectionTitle>Fitness / Booking Off</SectionTitle>
+            <ReferralFormSection title="Fitness / Booking Off" icon={Activity}>
               <Field label="Fit for Work?" select value={form.fitForWork} onChange={set('fitForWork')}>
                 <option value="">Select…</option>
                 {['Fit','Unfit','Fit with restrictions'].map(o => <option key={o}>{o}</option>)}
@@ -2484,16 +2794,17 @@ function Reports() {
               <Field label="Days Booked Off" value={form.daysBookedOff} onChange={set('daysBookedOff')} />
               <Field label="From" type="date" value={form.fromDate} onChange={set('fromDate')} />
               <Field label="To" type="date" value={form.toDate} onChange={set('toDate')} />
-            </>
+            </ReferralFormSection>
           )}
 
-          <SectionTitle>Recommendations & Consent</SectionTitle>
-          <div className="col-span-2"><Field label="Recommendations" textarea value={form.recommendations} onChange={set('recommendations')} /></div>
-          <label className="col-span-2 flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
-            Patient consent obtained to release this report (POPIA)
-          </label>
+          <ReferralFormSection title="Recommendations & Consent" icon={ClipboardList}>
+            <div className="col-span-2"><Field label="Recommendations" textarea value={form.recommendations} onChange={set('recommendations')} /></div>
+            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-border bg-amber-50 px-4 py-3 text-sm text-ink">
+              <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
+              <span>Patient consent obtained to release this report <span className="font-semibold text-amber-700">(POPIA)</span></span>
+            </label>
+          </ReferralFormSection>
         </div>
         <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
           {saving ? 'Saving…' : 'Save Report'}
@@ -2503,17 +2814,46 @@ function Reports() {
       <Modal open={!!viewing} onClose={() => { setViewing(null); setEditing(false) }} title={editing ? 'Edit Report' : (viewing?.reportType || 'Medical Report')} size="xl">
         {viewing && !editing && (
           <div className="text-sm">
-            <RecordHeader
-              name={viewing.patient}
-              subtitle={viewing.reportType || 'Medical Report'}
-              status={viewing.fitForWork || null}
-              statusTone={viewing.fitForWork === 'Unfit' ? 'red' : viewing.fitForWork === 'Fit' ? 'green' : 'orange'}
-              meta={[
-                { icon: CreditCard, value: viewing.patientIdNumber, label: 'ID' },
-                { icon: Calendar, value: viewing.date, label: 'date' },
-                { icon: Stethoscope, value: viewing.practitioner, label: 'practitioner' },
-              ]}
-            />
+            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
+                    {initials(viewing.patient)}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-ink-secondary">{viewing.reportType || 'Medical Report'}</p>
+                  </div>
+                </div>
+                {viewing.fitForWork && (
+                  <StatusPill label={viewing.fitForWork} tone={viewing.fitForWork === 'Unfit' ? 'red' : viewing.fitForWork === 'Fit' ? 'green' : 'orange'} />
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-5 text-xs">
+                {viewing.patientIdNumber && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.patientIdNumber}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                </div>
+                {viewing.practitioner && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.practitioner}</p>
+                  </div>
+                )}
+                {viewing.recipient && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Addressed To</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.recipient}</p>
+                  </div>
+                )}
+              </div>
+            </div>
             <Toolbar>
               <ToolbarBtn onClick={startEdit} icon={Pencil}>Edit</ToolbarBtn>
               <ToolbarBtn onClick={() => downloadPdf(viewing)} disabled={busy === 'pdf'} loading={busy === 'pdf'} icon={Download}>
@@ -2522,66 +2862,92 @@ function Reports() {
               <ToolbarBtn onClick={() => openEmail(viewing)} icon={Mail} primary>Email to Doctor</ToolbarBtn>
             </Toolbar>
 
-            <div className="space-y-4">
-              <Card icon={ClipboardList} title="Report Details">
-                <DetailGrid>
-                  <Detail label="Report Type" value={viewing.reportType} />
-                  <Detail label="Addressed To" value={viewing.recipient} />
-                  <Detail label="Diagnosis" value={viewing.diagnosis} />
-                  <Detail label="ICD-10" value={viewing.icd10} />
-                </DetailGrid>
-              </Card>
+            <div className="overflow-hidden rounded-xl border border-border">
+              <div className="border-b border-border">
+                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Report Details</h4>
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-border/70">
+                  <ReferralField label="Report Type" value={viewing.reportType} />
+                  <ReferralField label="Diagnosis" value={viewing.diagnosis} />
+                </div>
+                {viewing.icd10 && (
+                  <div className="border-t border-border/70">
+                    <ReferralField label="ICD-10 Code(s)" value={viewing.icd10} full />
+                  </div>
+                )}
+              </div>
 
               {(viewing.history || viewing.clinicalFindings || viewing.treatment || viewing.prognosis) && (
-                <Card icon={FileText} title="Clinical Content">
-                  <Detail label="Relevant History" value={viewing.history} block />
-                  <Detail label="Clinical Findings" value={viewing.clinicalFindings} block />
-                  <Detail label="Treatment / Management" value={viewing.treatment} block />
-                  <Detail label="Prognosis" value={viewing.prognosis} block />
-                </Card>
+                <div className="border-b border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Clinical Content</h4>
+                  </div>
+                  <div className="divide-y divide-border/70">
+                    {viewing.history && <ReferralField label="Relevant History" value={viewing.history} full />}
+                    {viewing.clinicalFindings && <ReferralField label="Clinical Findings" value={viewing.clinicalFindings} full />}
+                    {viewing.treatment && <ReferralField label="Treatment / Management" value={viewing.treatment} full />}
+                    {viewing.prognosis && <ReferralField label="Prognosis" value={viewing.prognosis} full />}
+                  </div>
+                </div>
               )}
 
               {viewing.fitForWork && (
-                <Card icon={Activity} title="Fitness / Booking Off">
-                  <DetailGrid>
-                    <Detail label="Status" value={viewing.fitForWork} />
-                    <Detail label="Days Booked Off" value={viewing.daysBookedOff} />
-                    <Detail label="From" value={viewing.fromDate} />
-                    <Detail label="To" value={viewing.toDate} />
-                  </DetailGrid>
-                </Card>
+                <div className="border-b border-border">
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Fitness / Booking Off</h4>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="Status" value={viewing.fitForWork} />
+                    <ReferralField label="Days Booked Off" value={viewing.daysBookedOff} />
+                  </div>
+                  {(viewing.fromDate || viewing.toDate) && (
+                    <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                      <ReferralField label="From" value={fmtDate(viewing.fromDate)} />
+                      <ReferralField label="To" value={fmtDate(viewing.toDate)} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {viewing.recommendations && (
-                <Card icon={ClipboardList} title="Recommendations">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{viewing.recommendations}</p>
-                </Card>
+                <div>
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Recommendations</h4>
+                  </div>
+                  <ReferralField label="Recommendations" value={viewing.recommendations} full />
+                </div>
               )}
             </div>
           </div>
         )}
 
         {viewing && editing && editForm && (
-          <div className="grid grid-cols-2 gap-4">
-            <SectionTitle>Report Details</SectionTitle>
-            <Field label="Report Type" select value={editForm.reportType} onChange={setE('reportType')}>
-              {REPORT_TYPES.map(t => <option key={t}>{t}</option>)}
-            </Field>
-            <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
-            <Field label="Practitioner" value={editForm.practitioner} onChange={setE('practitioner')} />
-            <Field label="Addressed To" value={editForm.recipient} onChange={setE('recipient')} />
+          <div className="space-y-4">
+            <ReferralFormSection title="Report Details" icon={FileText}>
+              <Field label="Report Type" select value={editForm.reportType} onChange={setE('reportType')}>
+                {REPORT_TYPES.map(t => <option key={t}>{t}</option>)}
+              </Field>
+              <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
+              <Field label="Practitioner" value={editForm.practitioner} onChange={setE('practitioner')} />
+              <div className="col-span-2"><Field label="Addressed To (recipient / employer / insurer)" value={editForm.recipient} onChange={setE('recipient')} /></div>
+            </ReferralFormSection>
 
-            <SectionTitle>Clinical Content</SectionTitle>
-            <div className="col-span-2"><Field label="Diagnosis" value={editForm.diagnosis} onChange={setE('diagnosis')} /></div>
-            <Field label="ICD-10 Code(s)" value={editForm.icd10} onChange={setE('icd10')} />
-            <div className="col-span-2"><Field label="Relevant History" textarea value={editForm.history} onChange={setE('history')} /></div>
-            <div className="col-span-2"><Field label="Clinical Findings" textarea value={editForm.clinicalFindings} onChange={setE('clinicalFindings')} /></div>
-            <div className="col-span-2"><Field label="Treatment / Management" textarea value={editForm.treatment} onChange={setE('treatment')} /></div>
-            <div className="col-span-2"><Field label="Prognosis" textarea value={editForm.prognosis} onChange={setE('prognosis')} /></div>
+            <ReferralFormSection title="Clinical Content" icon={ClipboardList}>
+              <div className="col-span-2"><Field label="Diagnosis" value={editForm.diagnosis} onChange={setE('diagnosis')} /></div>
+              <Field label="ICD-10 Code(s)" value={editForm.icd10} onChange={setE('icd10')} placeholder="e.g. J45.9, I10" />
+              <div className="col-span-2"><Field label="Relevant History" textarea value={editForm.history} onChange={setE('history')} /></div>
+              <div className="col-span-2"><Field label="Clinical Findings" textarea value={editForm.clinicalFindings} onChange={setE('clinicalFindings')} /></div>
+              <div className="col-span-2"><Field label="Treatment / Management" textarea value={editForm.treatment} onChange={setE('treatment')} /></div>
+              <div className="col-span-2"><Field label="Prognosis" textarea value={editForm.prognosis} onChange={setE('prognosis')} /></div>
+            </ReferralFormSection>
 
             {editIsSickNote && (
-              <>
-                <SectionTitle>Fitness / Booking Off</SectionTitle>
+              <ReferralFormSection title="Fitness / Booking Off" icon={Activity}>
                 <Field label="Fit for Work?" select value={editForm.fitForWork} onChange={setE('fitForWork')}>
                   <option value="">Select…</option>
                   {['Fit','Unfit','Fit with restrictions'].map(o => <option key={o}>{o}</option>)}
@@ -2589,13 +2955,14 @@ function Reports() {
                 <Field label="Days Booked Off" value={editForm.daysBookedOff} onChange={setE('daysBookedOff')} />
                 <Field label="From" type="date" value={editForm.fromDate} onChange={setE('fromDate')} />
                 <Field label="To" type="date" value={editForm.toDate} onChange={setE('toDate')} />
-              </>
+              </ReferralFormSection>
             )}
 
-            <SectionTitle>Recommendations</SectionTitle>
-            <div className="col-span-2"><Field label="Recommendations" textarea value={editForm.recommendations} onChange={setE('recommendations')} /></div>
+            <ReferralFormSection title="Recommendations" icon={ClipboardList}>
+              <div className="col-span-2"><Field label="Recommendations" textarea value={editForm.recommendations} onChange={setE('recommendations')} /></div>
+            </ReferralFormSection>
 
-            <div className="col-span-2 mt-2 flex gap-2">
+            <div className="flex gap-2">
               <button onClick={saveEdit} disabled={savingEdit}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
@@ -2615,7 +2982,7 @@ function Reports() {
           <Field label="Recipient Email *" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="doctor@practice.co.za" />
           <Field label="Message" textarea value={emailMsg} onChange={e => setEmailMsg(e.target.value)} />
           <p className="rounded-xl bg-surface-2 p-3 text-xs text-ink-secondary">
-            The report will be attached as a branded PDF. Sent securely via SendGrid from your practice address.
+            The report will be attached as a branded PDF and sent securely from your practice address.
           </p>
           <button onClick={sendEmailToDoctor} disabled={busy === 'email'}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
@@ -2628,6 +2995,43 @@ function Reports() {
 }
 
 // ── Referrals ───────────────────────────────────────────────────────────────────
+
+// Read-only form field used inside the referral view modal
+function ReferralField({ label, value, full }) {
+  return (
+    <div className={`px-4 py-3 ${full ? 'col-span-2' : ''}`}>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary/60">{label}</p>
+      <p className={`text-sm leading-snug ${value ? 'text-ink' : 'italic text-ink-secondary/30'}`}>{value || '—'}</p>
+    </div>
+  )
+}
+
+// Titled section card wrapping form fields in new/edit modals
+function ReferralFormSection({ title, icon: Icon, children }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Icon size={13} /></span>}
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">{title}</h4>
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-4">{children}</div>
+    </div>
+  )
+}
+
+// Titled section card for view modals with free-form children (no forced grid)
+function RecordViewSection({ title, icon: Icon, children }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Icon size={13} /></span>}
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">{title}</h4>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  )
+}
+
 const REFERRAL_STATUS = ['Sent','Acknowledged','Appointment Booked','Completed','Declined']
 const URGENCY = ['Routine','Urgent','Emergency']
 const REFERRAL_BLANK = {
@@ -2660,6 +3064,7 @@ function Referrals() {
 
   const practice = {
     name: profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl: profile?.businessLogoUrl || '',
     line: [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
   }
 
@@ -2762,7 +3167,7 @@ function Referrals() {
   }[s] || 'bg-surface-2 text-ink-secondary')
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'patient', label: 'Patient' },
     { key: 'specialist', label: 'Referred To' },
     { key: 'specialistDiscipline', label: 'Discipline' },
@@ -2791,42 +3196,46 @@ function Referrals() {
       <DataTable columns={cols} data={referrals} emptyMessage="No referrals yet." onRowClick={openView} />
 
       <Modal open={open} onClose={() => setOpen(false)} title="New Referral" size="xl">
-        <div className="grid grid-cols-2 gap-4">
-          <SectionTitle>Patient & Referrer</SectionTitle>
-          <Field label="Patient *" select value={form.patientId} onChange={selectPatient}>
-            <option value="">Select patient…</option>
-            {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-          </Field>
-          <Field label="Referring Practitioner" select value={form.referringPractitioner} onChange={set('referringPractitioner')}>
-            <option value="">Select…</option>
-            {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`.trim()}>{p.title} {p.name}</option>)}
-          </Field>
-          <Field label="Date" type="date" value={form.date} onChange={set('date')} />
-          <Field label="Urgency" select value={form.urgency} onChange={set('urgency')}>
-            {URGENCY.map(u => <option key={u}>{u}</option>)}
-          </Field>
+        <div className="space-y-4">
+          <ReferralFormSection title="Patient & Referrer" icon={User}>
+            <Field label="Patient *" select value={form.patientId} onChange={selectPatient}>
+              <option value="">Select patient…</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </Field>
+            <Field label="Referring Practitioner" select value={form.referringPractitioner} onChange={set('referringPractitioner')}>
+              <option value="">Select…</option>
+              {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`.trim()}>{p.title} {p.name}</option>)}
+            </Field>
+            <Field label="Date" type="date" value={form.date} onChange={set('date')} />
+            <Field label="Urgency" select value={form.urgency} onChange={set('urgency')}>
+              {URGENCY.map(u => <option key={u}>{u}</option>)}
+            </Field>
+          </ReferralFormSection>
 
-          <SectionTitle>Refer To (Specialist)</SectionTitle>
-          <Field label="Specialist Name *" value={form.specialist} onChange={set('specialist')} />
-          <Field label="Discipline / Speciality" value={form.specialistDiscipline} onChange={set('specialistDiscipline')} placeholder="e.g. Cardiology" />
-          <Field label="Practice / Hospital" value={form.specialistPractice} onChange={set('specialistPractice')} />
-          <Field label="Specialist Contact" value={form.specialistContact} onChange={set('specialistContact')} placeholder="Phone / email" />
+          <ReferralFormSection title="Refer To (Specialist)" icon={UserCircle}>
+            <Field label="Specialist Name *" value={form.specialist} onChange={set('specialist')} />
+            <Field label="Discipline / Speciality" value={form.specialistDiscipline} onChange={set('specialistDiscipline')} placeholder="e.g. Cardiology" />
+            <Field label="Practice / Hospital" value={form.specialistPractice} onChange={set('specialistPractice')} />
+            <Field label="Specialist Contact" value={form.specialistContact} onChange={set('specialistContact')} placeholder="Phone / email" />
+          </ReferralFormSection>
 
-          <SectionTitle>Clinical Information</SectionTitle>
-          <div className="col-span-2"><Field label="Reason for Referral" value={form.reason} onChange={set('reason')} /></div>
-          <Field label="ICD-10 Code(s)" value={form.icd10} onChange={set('icd10')} placeholder="e.g. I25.9" />
-          <Field label="Current Medication" value={form.currentMedication} onChange={set('currentMedication')} />
-          <div className="col-span-2"><Field label="Clinical Summary / History" textarea value={form.clinicalSummary} onChange={set('clinicalSummary')} /></div>
-          <div className="col-span-2"><Field label="Relevant Investigations / Results" textarea value={form.investigations} onChange={set('investigations')} /></div>
+          <ReferralFormSection title="Clinical Information" icon={FileText}>
+            <div className="col-span-2"><Field label="Reason for Referral" value={form.reason} onChange={set('reason')} /></div>
+            <Field label="ICD-10 Code(s)" value={form.icd10} onChange={set('icd10')} placeholder="e.g. I25.9" />
+            <Field label="Current Medication" value={form.currentMedication} onChange={set('currentMedication')} />
+            <div className="col-span-2"><Field label="Clinical Summary / History" textarea value={form.clinicalSummary} onChange={set('clinicalSummary')} /></div>
+            <div className="col-span-2"><Field label="Relevant Investigations / Results" textarea value={form.investigations} onChange={set('investigations')} /></div>
+          </ReferralFormSection>
 
-          <SectionTitle>Medical Aid & Authorisation</SectionTitle>
-          <Field label="Medical Aid (auto-filled)" value={form.medicalAid} onChange={set('medicalAid')} />
-          <Field label="Pre-Authorisation No." value={form.authNumber} onChange={set('authNumber')} />
-          <label className="col-span-2 flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
-            Patient consent obtained to share clinical information with the specialist (POPIA)
-          </label>
+          <ReferralFormSection title="Medical Aid & Authorisation" icon={CreditCard}>
+            <Field label="Medical Aid (auto-filled)" value={form.medicalAid} onChange={set('medicalAid')} />
+            <Field label="Pre-Authorisation No." value={form.authNumber} onChange={set('authNumber')} />
+            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-border bg-amber-50 px-4 py-3 text-sm text-ink">
+              <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
+              <span>Patient consent obtained to share clinical information with the specialist <span className="font-semibold text-amber-700">(POPIA)</span></span>
+            </label>
+          </ReferralFormSection>
         </div>
         <button onClick={save} disabled={saving} className="mt-5 w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
           {saving ? 'Saving…' : 'Save Referral'}
@@ -2837,17 +3246,47 @@ function Referrals() {
       <Modal open={!!viewing} onClose={() => { setViewing(null); setEditing(false) }} title={editing ? 'Edit Referral' : 'Referral Letter'} size="xl">
         {viewing && !editing && (
           <div className="text-sm">
-            <RecordHeader
-              name={viewing.patient}
-              subtitle="Referral Letter"
-              status={viewing.status}
-              statusTone={REFERRAL_TONE[viewing.status] || 'slate'}
-              meta={[
-                { icon: CreditCard, value: viewing.patientIdNumber, label: 'ID' },
-                { icon: Calendar, value: viewing.date, label: 'date' },
-                { icon: Stethoscope, value: viewing.referringPractitioner, label: 'referrer' },
-              ]}
-            />
+            {/* Header */}
+            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
+                    {initials(viewing.patient)}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-ink-secondary">Referral Letter</p>
+                  </div>
+                </div>
+                <StatusPill label={viewing.status} tone={REFERRAL_TONE[viewing.status] || 'slate'} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-5 text-xs">
+                {viewing.patientIdNumber && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.patientIdNumber}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                </div>
+                {viewing.referringPractitioner && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Referring Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-ink">{viewing.referringPractitioner}</p>
+                  </div>
+                )}
+                {viewing.urgency && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Urgency</p>
+                    <div className="mt-1"><StatusPill label={viewing.urgency} tone={URGENCY_TONE[viewing.urgency] || 'slate'} /></div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Toolbar */}
             <Toolbar>
               <ToolbarBtn onClick={startEdit} icon={Pencil}>Edit</ToolbarBtn>
               <ToolbarBtn onClick={() => downloadPdf(viewing)} disabled={busy === 'pdf'} loading={busy === 'pdf'} icon={Download}>
@@ -2856,70 +3295,95 @@ function Referrals() {
               <ToolbarBtn onClick={() => openEmail(viewing)} icon={Mail} primary>Email to Specialist</ToolbarBtn>
             </Toolbar>
 
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <StatusPill label={`Urgency: ${viewing.urgency}`} tone={URGENCY_TONE[viewing.urgency] || 'slate'} />
+            {/* Form-grid sections */}
+            <div className="overflow-hidden rounded-xl border border-border">
+
+              {/* Refer To (Specialist) */}
+              <div className="border-b border-border">
+                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><UserCircle size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Refer To (Specialist)</h4>
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-border/70">
+                  <ReferralField label="Specialist" value={viewing.specialist} />
+                  <ReferralField label="Discipline" value={viewing.specialistDiscipline} />
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                  <ReferralField label="Practice / Hospital" value={viewing.specialistPractice} />
+                  <ReferralField label="Contact" value={viewing.specialistContact} />
+                </div>
               </div>
 
-              <Card icon={User} title="Refer To (Specialist)">
-                <DetailGrid>
-                  <Detail label="Specialist" value={viewing.specialist} />
-                  <Detail label="Discipline" value={viewing.specialistDiscipline} />
-                  <Detail label="Practice / Hospital" value={viewing.specialistPractice} />
-                  <Detail label="Contact" value={viewing.specialistContact} />
-                </DetailGrid>
-              </Card>
+              {/* Clinical Information */}
+              <div className="border-b border-border">
+                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Clinical Information</h4>
+                </div>
+                <div className="divide-y divide-border/70">
+                  {viewing.reason && (
+                    <ReferralField label="Reason for Referral" value={viewing.reason} full />
+                  )}
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="ICD-10 Code(s)" value={viewing.icd10} />
+                    <ReferralField label="Current Medication" value={viewing.currentMedication} />
+                  </div>
+                  {viewing.clinicalSummary && <ReferralField label="Clinical Summary / History" value={viewing.clinicalSummary} full />}
+                  {viewing.investigations && <ReferralField label="Investigations / Results" value={viewing.investigations} full />}
+                </div>
+              </div>
 
-              <Card icon={FileText} title="Clinical Information">
-                <Detail label="Reason for Referral" value={viewing.reason} block />
-                <Detail label="ICD-10 Code(s)" value={viewing.icd10} />
-                <Detail label="Clinical Summary / History" value={viewing.clinicalSummary} block />
-                <Detail label="Investigations / Results" value={viewing.investigations} block />
-                <Detail label="Current Medication" value={viewing.currentMedication} block />
-              </Card>
-
+              {/* Medical Aid & Authorisation */}
               {(viewing.medicalAid || viewing.authNumber) && (
-                <Card icon={CreditCard} title="Medical Aid & Authorisation">
-                  <DetailGrid>
-                    <Detail label="Medical Aid" value={viewing.medicalAid} />
-                    <Detail label="Pre-Authorisation No." value={viewing.authNumber} />
-                  </DetailGrid>
-                </Card>
+                <div>
+                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><CreditCard size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Medical Aid & Authorisation</h4>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border/70">
+                    <ReferralField label="Medical Aid" value={viewing.medicalAid} />
+                    <ReferralField label="Pre-Authorisation No." value={viewing.authNumber} />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
 
         {viewing && editing && editForm && (
-          <div className="grid grid-cols-2 gap-4">
-            <SectionTitle>Patient & Referrer</SectionTitle>
-            <Field label="Referring Practitioner" value={editForm.referringPractitioner} onChange={setE('referringPractitioner')} />
-            <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
-            <Field label="Urgency" select value={editForm.urgency} onChange={setE('urgency')}>
-              {URGENCY.map(u => <option key={u}>{u}</option>)}
-            </Field>
-            <Field label="Status" select value={editForm.status} onChange={setE('status')}>
-              {REFERRAL_STATUS.map(s => <option key={s}>{s}</option>)}
-            </Field>
+          <div className="space-y-4">
+            <ReferralFormSection title="Patient & Referrer" icon={User}>
+              <Field label="Referring Practitioner" value={editForm.referringPractitioner} onChange={setE('referringPractitioner')} />
+              <Field label="Date" type="date" value={editForm.date} onChange={setE('date')} />
+              <Field label="Urgency" select value={editForm.urgency} onChange={setE('urgency')}>
+                {URGENCY.map(u => <option key={u}>{u}</option>)}
+              </Field>
+              <Field label="Status" select value={editForm.status} onChange={setE('status')}>
+                {REFERRAL_STATUS.map(s => <option key={s}>{s}</option>)}
+              </Field>
+            </ReferralFormSection>
 
-            <SectionTitle>Refer To (Specialist)</SectionTitle>
-            <Field label="Specialist Name" value={editForm.specialist} onChange={setE('specialist')} />
-            <Field label="Discipline / Speciality" value={editForm.specialistDiscipline} onChange={setE('specialistDiscipline')} />
-            <Field label="Practice / Hospital" value={editForm.specialistPractice} onChange={setE('specialistPractice')} />
-            <Field label="Specialist Contact" value={editForm.specialistContact} onChange={setE('specialistContact')} />
+            <ReferralFormSection title="Refer To (Specialist)" icon={UserCircle}>
+              <Field label="Specialist Name" value={editForm.specialist} onChange={setE('specialist')} />
+              <Field label="Discipline / Speciality" value={editForm.specialistDiscipline} onChange={setE('specialistDiscipline')} />
+              <Field label="Practice / Hospital" value={editForm.specialistPractice} onChange={setE('specialistPractice')} />
+              <Field label="Specialist Contact" value={editForm.specialistContact} onChange={setE('specialistContact')} />
+            </ReferralFormSection>
 
-            <SectionTitle>Clinical Information</SectionTitle>
-            <div className="col-span-2"><Field label="Reason for Referral" value={editForm.reason} onChange={setE('reason')} /></div>
-            <Field label="ICD-10 Code(s)" value={editForm.icd10} onChange={setE('icd10')} />
-            <Field label="Current Medication" value={editForm.currentMedication} onChange={setE('currentMedication')} />
-            <div className="col-span-2"><Field label="Clinical Summary / History" textarea value={editForm.clinicalSummary} onChange={setE('clinicalSummary')} /></div>
-            <div className="col-span-2"><Field label="Relevant Investigations / Results" textarea value={editForm.investigations} onChange={setE('investigations')} /></div>
+            <ReferralFormSection title="Clinical Information" icon={FileText}>
+              <div className="col-span-2"><Field label="Reason for Referral" value={editForm.reason} onChange={setE('reason')} /></div>
+              <Field label="ICD-10 Code(s)" value={editForm.icd10} onChange={setE('icd10')} />
+              <Field label="Current Medication" value={editForm.currentMedication} onChange={setE('currentMedication')} />
+              <div className="col-span-2"><Field label="Clinical Summary / History" textarea value={editForm.clinicalSummary} onChange={setE('clinicalSummary')} /></div>
+              <div className="col-span-2"><Field label="Relevant Investigations / Results" textarea value={editForm.investigations} onChange={setE('investigations')} /></div>
+            </ReferralFormSection>
 
-            <SectionTitle>Medical Aid & Authorisation</SectionTitle>
-            <Field label="Medical Aid" value={editForm.medicalAid} onChange={setE('medicalAid')} />
-            <Field label="Pre-Authorisation No." value={editForm.authNumber} onChange={setE('authNumber')} />
+            <ReferralFormSection title="Medical Aid & Authorisation" icon={CreditCard}>
+              <Field label="Medical Aid" value={editForm.medicalAid} onChange={setE('medicalAid')} />
+              <Field label="Pre-Authorisation No." value={editForm.authNumber} onChange={setE('authNumber')} />
+            </ReferralFormSection>
 
-            <div className="col-span-2 mt-2 flex gap-2">
+            <div className="flex gap-2">
               <button onClick={saveEdit} disabled={savingEdit}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
@@ -2939,7 +3403,7 @@ function Referrals() {
           <Field label="Specialist Email *" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="specialist@practice.co.za" />
           <Field label="Message" textarea value={emailMsg} onChange={e => setEmailMsg(e.target.value)} />
           <p className="rounded-xl bg-surface-2 p-3 text-xs text-ink-secondary">
-            The referral will be attached as a branded PDF letter. Sent securely via SendGrid from your practice address.
+            The referral will be attached as a branded PDF letter and sent securely from your practice address.
           </p>
           <button onClick={sendEmailToSpecialist} disabled={busy === 'email'}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
@@ -2983,64 +3447,6 @@ function Messages() {
   )
 }
 
-// ── Surveys ───────────────────────────────────────────────────────────────────
-function Surveys() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const surveys = useCollection(uid ? `users/${uid}/surveys` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', questions: [''] })
-  function addQ() { setForm(f => ({ ...f, questions: [...f.questions, ''] })) }
-  function updateQ(i, v) { setForm(f => { const q = [...f.questions]; q[i] = v; return { ...f, questions: q } }) }
-  function removeQ(i) { setForm(f => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })) }
-  async function save() {
-    if (!uid || !form.title) return
-    await addDoc(collection(db, 'users', uid, 'surveys'), { ...form, questions: form.questions.filter(q => q.trim()), status: 'Draft', responses: 0, createdAt: serverTimestamp() })
-    setForm({ title: '', description: '', questions: [''] }); setOpen(false)
-  }
-  const statusColor = s => ({ Draft: 'bg-gray-100 text-gray-600', Active: 'bg-green-100 text-green-700', Closed: 'bg-amber-100 text-amber-700' }[s] ?? '')
-  const cols = [
-    { key: 'title', label: 'Survey' },
-    { key: 'questions', label: 'Questions', render: r => `${(r.questions || []).length}` },
-    { key: 'responses', label: 'Responses', render: r => r.responses ?? 0 },
-    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status || 'Draft'}</span> },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex gap-1">
-        {r.status !== 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Active' }) }} className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Activate</button>}
-        {r.status === 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Closed' }) }} className="rounded px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50">Close</button>}
-        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this survey? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'surveys', r.id)) }} className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-      </div>
-    )},
-  ]
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-base font-bold text-ink">Surveys</h2><p className="mt-0.5 text-sm text-ink-secondary">Collect feedback from patients</p></div>
-        <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]"><PlusCircle size={15} /> New Survey</button>
-      </div>
-      <DataTable columns={cols} data={surveys} emptyMessage="No surveys yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Survey" size="lg">
-        <div className="space-y-4">
-          <Field label="Survey Title *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-          <Field label="Description" textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-          <div>
-            <p className="mb-2 text-xs font-semibold text-ink-secondary">Questions</p>
-            {form.questions.map((q, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <input value={q} onChange={e => updateQ(i, e.target.value)} placeholder={`Question ${i + 1}`}
-                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
-                {form.questions.length > 1 && <button onClick={() => removeQ(i)} className="text-red-400 hover:text-red-600"><X size={15} /></button>}
-              </div>
-            ))}
-            <button onClick={addQ} className="text-xs font-semibold text-primary hover:underline">+ Add question</button>
-          </div>
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Create Survey</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
-
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
   return <SettingsPage industry="medical" />
@@ -3058,7 +3464,7 @@ export default function MedicalDashboard() {
         <Route path="reports" element={<Reports />} />
         <Route path="referrals" element={<Referrals />} />
         <Route path="messages" element={<Messages />} />
-        <Route path="surveys" element={<Surveys />} />
+        <Route path="surveys" element={<SurveysModule industry="medical" />} />
         <Route path="campaigns" element={<CampaignsModule industry="medical" />} />
         <Route path="profile" element={<ProfilePage industry="medical" />} />
 

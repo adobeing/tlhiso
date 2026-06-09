@@ -10,10 +10,13 @@ import ProfilePage from '../../shared/ProfilePage'
 import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
-import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X } from 'lucide-react'
+import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X, FileText, Users, Receipt, ClipboardList } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import SetupChecklist from '../../shared/SetupChecklist'
+import AppointmentCalendar from '../../shared/AppointmentCalendar'
+import SurveysModule from '../../shared/SurveysModule'
 import SettingsPage from '../../shared/SettingsPage'
+import { fmtDate } from '../../../utils/dates'
 
 // ── Shared form field ─────────────────────────────────────────────────────────
 function Field({ label, error, textarea, select, children, ...props }) {
@@ -60,6 +63,19 @@ function SectionCard({ title, action, children }) {
         {action}
       </div>
       <div className="p-5">{children}</div>
+    </div>
+  )
+}
+
+// Titled section card for form modals (mirrors medical ReferralFormSection)
+function FormSection({ title, icon: Icon, children }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
+        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Icon size={13} /></span>}
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">{title}</h4>
+      </div>
+      <div className="space-y-3 p-4">{children}</div>
     </div>
   )
 }
@@ -233,10 +249,12 @@ function Invoices() {
   const invoices = useCollection(uid ? `users/${uid}/invoices` : null)
   const clients = useCollection(uid ? `users/${uid}/customers` : null)
   const [open, setOpen] = useState(false)
+  const [viewing, setViewing] = useState(null)
   const [form, setForm] = useState({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }] })
 
   const total = form.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0)
   const vat = total * 0.15
+  const fmt = n => `R ${Number(n ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`
 
   function addLine() { setForm(f => ({...f, items: [...f.items, { desc: '', qty: 1, price: 0 }]})) }
 
@@ -258,10 +276,12 @@ function Invoices() {
   const cols = [
     { key: 'client', label: 'Client' },
     { key: 'total', label: 'Amount', render: r => `R${Number(r.total ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}` },
-    { key: 'dueDate', label: 'Due Date' },
+    { key: 'dueDate', label: 'Due Date', render: r => fmtDate(r.dueDate) },
     { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status}</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center">
+        <button onClick={e => { e.stopPropagation(); setViewing(r) }} title="View invoice"
+          className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
         <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'invoices', r.id), { status: 'Paid' }) }}
           className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Mark Paid</button>
         <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this invoice? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'invoices', r.id)) }}
@@ -275,17 +295,119 @@ function Invoices() {
       <PageHead title="Invoices" subtitle="Create, send and track invoices"
         action={<AddButton onClick={() => setOpen(true)}>New Invoice</AddButton>} />
       <DataTable columns={cols} data={invoices} />
+      {/* ── Invoice view modal ── */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Invoice" size="lg">
+        {viewing && (
+          <div className="space-y-5 text-sm">
+            {/* Header: logo + business info / invoice label */}
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                {profile?.businessLogoUrl && (
+                  <img src={profile.businessLogoUrl} alt="Logo"
+                    className="h-14 w-14 rounded-lg border border-border object-contain p-1" />
+                )}
+                <div>
+                  <p className="font-bold text-ink">{profile?.businessName || profile?.name || '—'}</p>
+                  {profile?.address && <p className="text-xs text-ink-secondary">{profile.address}</p>}
+                  {profile?.vatNumber && <p className="text-xs text-ink-secondary">VAT: {profile.vatNumber}</p>}
+                  {profile?.phone && <p className="text-xs text-ink-secondary">{profile.phone}</p>}
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-extrabold tracking-wide text-primary">INVOICE</p>
+                <p className="mt-1 text-xs text-ink-secondary">Due: <strong>{viewing.dueDate || '—'}</strong></p>
+                <span className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(viewing.status)}`}>
+                  {viewing.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Bill To */}
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-secondary">Bill To</p>
+              <p className="font-semibold text-ink">{viewing.client || '—'}</p>
+            </div>
+
+            {/* Line items */}
+            <div className="overflow-hidden rounded-xl border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-2">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-ink-secondary">Description</th>
+                    <th className="px-3 py-2 text-right font-semibold text-ink-secondary">Qty</th>
+                    <th className="px-3 py-2 text-right font-semibold text-ink-secondary">Unit price</th>
+                    <th className="px-3 py-2 text-right font-semibold text-ink-secondary">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(viewing.items || []).map((item, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-3 py-2">{item.desc || '—'}</td>
+                      <td className="px-3 py-2 text-right">{item.qty}</td>
+                      <td className="px-3 py-2 text-right">{fmt(item.price)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{fmt(Number(item.qty) * Number(item.price))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals */}
+            <div className="ml-auto max-w-xs space-y-1 text-sm">
+              <div className="flex justify-between text-ink-secondary">
+                <span>Subtotal</span><span>{fmt(Number(viewing.total || 0) - Number(viewing.vat || 0))}</span>
+              </div>
+              <div className="flex justify-between text-ink-secondary">
+                <span>VAT (15%)</span><span>{fmt(viewing.vat || 0)}</span>
+              </div>
+              <div className="flex justify-between border-t border-border pt-2 font-bold text-primary">
+                <span>Total</span><span>{fmt(viewing.total || 0)}</span>
+              </div>
+            </div>
+
+            {/* Notes */}
+            {viewing.notes && (
+              <div>
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-ink-secondary">Notes</p>
+                <p className="text-ink-secondary">{viewing.notes}</p>
+              </div>
+            )}
+
+            {/* Banking details */}
+            {profile?.bankingDetails && (
+              <div className="rounded-xl bg-surface-2 p-4">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-ink-secondary">Banking Details</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <span className="text-ink-secondary">Bank</span>
+                  <span className="font-medium">{profile.bankingDetails.bankName}</span>
+                  <span className="text-ink-secondary">Account holder</span>
+                  <span className="font-medium">{profile.bankingDetails.accountHolder}</span>
+                  <span className="text-ink-secondary">Account number</span>
+                  <span className="font-medium">{profile.bankingDetails.accountNumber}</span>
+                  <span className="text-ink-secondary">Branch code</span>
+                  <span className="font-medium">{profile.bankingDetails.branchCode}</span>
+                  <span className="text-ink-secondary">Account type</span>
+                  <span className="font-medium">{profile.bankingDetails.accountType}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
       <Modal open={open} onClose={() => setOpen(false)} title="New Invoice" size="lg">
         <div className="space-y-4">
-          <Field label="Client" select value={form.clientId} onChange={e => setForm(f => ({...f, clientId: e.target.value}))}>
-            <option value="">Select client…</option>
-            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Field>
-          <Field label="Due Date" type="date" value={form.dueDate} onChange={e => setForm(f => ({...f, dueDate: e.target.value}))} />
-          <div>
-            <p className="mb-2 text-xs font-semibold text-ink-secondary">Line Items</p>
+          <FormSection title="Invoice Details" icon={Receipt}>
+            <Field label="Client *" select value={form.clientId} onChange={e => setForm(f => ({...f, clientId: e.target.value}))}>
+              <option value="">Select client…</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Field>
+            <Field label="Due Date" type="date" value={form.dueDate} onChange={e => setForm(f => ({...f, dueDate: e.target.value}))} />
+          </FormSection>
+
+          <FormSection title="Line Items" icon={ClipboardList}>
             {form.items.map((item, idx) => (
-              <div key={idx} className="mb-2 grid grid-cols-5 gap-2">
+              <div key={idx} className="grid grid-cols-5 gap-2">
                 <input placeholder="Description" value={item.desc}
                   onChange={e => setForm(f => { const items = [...f.items]; items[idx].desc = e.target.value; return {...f, items} })}
                   className="col-span-3 rounded-xl border border-border px-3 py-2 text-sm outline-none focus:border-primary" />
@@ -297,14 +419,18 @@ function Invoices() {
                   className="rounded-xl border border-border px-3 py-2 text-sm outline-none focus:border-primary" />
               </div>
             ))}
-            <button onClick={addLine} className="text-xs text-primary font-semibold hover:underline">+ Add line</button>
-          </div>
-          <div className="rounded-xl bg-surface-2 p-3 text-sm">
-            <div className="flex justify-between"><span className="text-ink-secondary">Subtotal</span><span className="font-semibold">R{total.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-ink-secondary">VAT (15%)</span><span className="font-semibold">R{vat.toFixed(2)}</span></div>
-            <div className="flex justify-between border-t border-border pt-2 mt-2"><span className="font-bold">Total</span><span className="font-bold text-primary">R{(total + vat).toFixed(2)}</span></div>
-          </div>
-          <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} />
+            <button onClick={addLine} className="text-xs font-semibold text-primary hover:underline">+ Add line</button>
+          </FormSection>
+
+          <FormSection title="Summary & Notes" icon={FileText}>
+            <div className="rounded-xl bg-surface-2 p-3 text-sm">
+              <div className="flex justify-between"><span className="text-ink-secondary">Subtotal</span><span className="font-semibold">R{total.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-ink-secondary">VAT (15%)</span><span className="font-semibold">R{vat.toFixed(2)}</span></div>
+              <div className="mt-2 flex justify-between border-t border-border pt-2"><span className="font-bold">Total</span><span className="font-bold text-primary">R{(total + vat).toFixed(2)}</span></div>
+            </div>
+            <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} />
+          </FormSection>
+
           <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">Save Invoice</button>
         </div>
       </Modal>
@@ -343,7 +469,8 @@ function Appointments() {
     setSendingId(appt.id)
     try {
       const fn = httpsCallable(functions, 'sendSMS')
-      const msg = `Reminder: ${appt.customer}, you have an appointment on ${appt.date} at ${appt.time}. Reply to reschedule.`
+      const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
+      const msg = `Reminder: ${appt.customer}, you have an appointment on ${appt.date} at ${appt.time}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.customerPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), { to: appt.customerPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp() })
@@ -353,15 +480,28 @@ function Appointments() {
   const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-surface-2 text-ink-secondary')
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'time', label: 'Time' },
     { key: 'customer', label: 'Client' },
     { key: 'service', label: 'Service / Purpose' },
     { key: 'status', label: 'Status', render: r => (
-      <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
-        className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
-        {B2B_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
-      </select>
+      <div className="space-y-1">
+        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
+          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
+          {B2B_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
+        </select>
+        {r.confirmationStatus && (
+          <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            r.confirmationStatus === 'confirmed'              ? 'bg-green-100 text-green-700' :
+            r.confirmationStatus === 'cancelled'              ? 'bg-red-100 text-red-600' :
+            r.confirmationStatus === 'reschedule-requested'   ? 'bg-amber-100 text-amber-700' : ''
+          }`}>
+            {r.confirmationStatus === 'confirmed'            ? '✓ Client confirmed' :
+             r.confirmationStatus === 'cancelled'            ? '✗ Client cancelled' :
+             r.confirmationStatus === 'reschedule-requested' ? '⟳ Reschedule requested' : ''}
+          </span>
+        )}
+      </div>
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -376,9 +516,16 @@ function Appointments() {
 
   return (
     <div className="space-y-4">
-      <PageHead title="Appointments" subtitle="Book and manage client meetings"
-        action={<AddButton onClick={() => { setForm({ clientId: '', date: new Date().toISOString().slice(0, 10), time: '', service: '', duration: '60', status: 'Scheduled', notes: '' }); setOpen(true) }}>Book Appointment</AddButton>} />
-      <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
+      <AppointmentCalendar
+        appointments={appointments}
+        onSlotClick={(ds, h) => { setForm(f => ({ ...f, date: ds, time: `${String(h).padStart(2, '0')}:00` })); setOpen(true) }}
+        onApptClick={() => {}}
+        listColumns={cols}
+        title="Appointments"
+        subtitle="Book and manage client meetings"
+        headerAction={<AddButton onClick={() => { setForm({ clientId: '', date: new Date().toISOString().slice(0, 10), time: '', service: '', duration: '60', status: 'Scheduled', notes: '' }); setOpen(true) }}>Book Appointment</AddButton>}
+        emptyMessage="No appointments yet."
+      />
       <Modal open={open} onClose={() => setOpen(false)} title="Book Appointment">
         <div className="space-y-4">
           <Field label="Client *" select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}>
@@ -431,61 +578,6 @@ function Messages() {
         ))}
       </div>
       <DataTable columns={cols} data={sorted} emptyMessage="No messages sent yet. Use Campaigns or send appointment reminders to get started." />
-    </div>
-  )
-}
-
-// ── Surveys ───────────────────────────────────────────────────────────────────
-function Surveys() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const surveys = useCollection(uid ? `users/${uid}/surveys` : null)
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', questions: [''] })
-  function addQ() { setForm(f => ({ ...f, questions: [...f.questions, ''] })) }
-  function updateQ(i, v) { setForm(f => { const q = [...f.questions]; q[i] = v; return { ...f, questions: q } }) }
-  function removeQ(i) { setForm(f => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })) }
-  async function save() {
-    if (!uid || !form.title) return
-    await addDoc(collection(db, 'users', uid, 'surveys'), { ...form, questions: form.questions.filter(q => q.trim()), status: 'Draft', responses: 0, createdAt: serverTimestamp() })
-    setForm({ title: '', description: '', questions: [''] }); setOpen(false)
-  }
-  const statusColor = s => ({ Draft: 'bg-gray-100 text-gray-600', Active: 'bg-green-100 text-green-700', Closed: 'bg-amber-100 text-amber-700' }[s] ?? '')
-  const cols = [
-    { key: 'title', label: 'Survey' },
-    { key: 'questions', label: 'Questions', render: r => `${(r.questions || []).length}` },
-    { key: 'responses', label: 'Responses', render: r => r.responses ?? 0 },
-    { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>{r.status || 'Draft'}</span> },
-    { key: 'actions', label: '', sortable: false, render: r => (
-      <div className="flex gap-1">
-        {r.status !== 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Active' }) }} className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Activate</button>}
-        {r.status === 'Active' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'surveys', r.id), { status: 'Closed' }) }} className="rounded px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50">Close</button>}
-        <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this survey? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'surveys', r.id)) }} className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
-      </div>
-    )},
-  ]
-  return (
-    <div className="space-y-4">
-      <PageHead title="Surveys" subtitle="Collect feedback from clients" action={<AddButton onClick={() => setOpen(true)}>New Survey</AddButton>} />
-      <DataTable columns={cols} data={surveys} emptyMessage="No surveys yet." />
-      <Modal open={open} onClose={() => setOpen(false)} title="New Survey" size="lg">
-        <div className="space-y-4">
-          <Field label="Survey Title *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-          <Field label="Description" textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-          <div>
-            <p className="mb-2 text-xs font-semibold text-ink-secondary">Questions</p>
-            {form.questions.map((q, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <input value={q} onChange={e => updateQ(i, e.target.value)} placeholder={`Question ${i + 1}`}
-                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
-                {form.questions.length > 1 && <button onClick={() => removeQ(i)} className="text-red-400 hover:text-red-600"><X size={15} /></button>}
-              </div>
-            ))}
-            <button onClick={addQ} className="text-xs font-semibold text-primary hover:underline">+ Add question</button>
-          </div>
-          <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Create Survey</button>
-        </div>
-      </Modal>
     </div>
   )
 }
@@ -593,7 +685,21 @@ function Quotations() {
       <div className="flex gap-1 flex-wrap">
         {r.status === 'Draft' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'quotations', r.id), { status: 'Sent' }) }} className="rounded px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50">Mark Sent</button>}
         {r.status === 'Sent' && <><button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'quotations', r.id), { status: 'Accepted' }) }} className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Accept</button><button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'quotations', r.id), { status: 'Rejected' }) }} className="rounded px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50">Reject</button></>}
-        {r.status === 'Accepted' && <button onClick={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'quotations', r.id), { status: 'Invoiced' }) }} className="rounded px-2 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-50">Convert to Invoice</button>}
+        {r.status === 'Accepted' && <button onClick={async e => {
+          e.stopPropagation()
+          await addDoc(collection(db, 'users', uid, 'invoices'), {
+            clientId: r.clientId,
+            client:   r.client,
+            items:    r.items ?? [],
+            total:    r.total,
+            vat:      r.vat,
+            notes:    r.notes ?? '',
+            status:   'Draft',
+            fromQuotationId: r.id,
+            createdAt: serverTimestamp(),
+          })
+          await updateDoc(doc(db, 'users', uid, 'quotations', r.id), { status: 'Invoiced' })
+        }} className="rounded px-2 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-50">Convert to Invoice</button>}
         <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this quotation? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'quotations', r.id)) }} className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
       </div>
     )},
@@ -652,8 +758,8 @@ function Projects() {
     { key: 'title', label: 'Project' },
     { key: 'client', label: 'Client' },
     { key: 'value', label: 'Value', render: r => r.value ? `R ${Number(r.value).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}` : '—' },
-    { key: 'startDate', label: 'Start' },
-    { key: 'endDate', label: 'End' },
+    { key: 'startDate', label: 'Start', render: r => fmtDate(r.startDate) },
+    { key: 'endDate', label: 'End', render: r => fmtDate(r.endDate) },
     { key: 'status', label: 'Status', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${statusColor(r.status)}`}>{(r.status || '').replace('-', ' ')}</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex gap-1">
@@ -765,7 +871,7 @@ export default function B2BDashboard() {
         <Route path="service-list" element={<ServiceList />} />
         <Route path="appointments" element={<Appointments />} />
         <Route path="messages" element={<Messages />} />
-        <Route path="surveys" element={<Surveys />} />
+        <Route path="surveys" element={<SurveysModule industry="b2b" />} />
         <Route path="marketing-optin" element={<MarketingOptIn />} />
         <Route path="campaigns" element={<CampaignsModule industry="b2b" />} />
         <Route path="profile" element={<ProfilePage industry="b2b" />} />
