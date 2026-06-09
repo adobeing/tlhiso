@@ -46,12 +46,14 @@ export default function AppointmentResponsePage() {
     try {
       if (action === 'confirm') {
         await updateDoc(doc(db, 'users', userId, 'appointments', appointmentId), {
+          status: 'Confirmed',
           confirmationStatus: 'confirmed',
           responseAt: serverTimestamp(),
         })
         setDone('confirm')
       } else if (action === 'cancel') {
         await updateDoc(doc(db, 'users', userId, 'appointments', appointmentId), {
+          status: 'Cancelled',
           confirmationStatus: 'cancelled',
           responseAt: serverTimestamp(),
         })

@@ -299,7 +299,30 @@ function Appointments() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ customerId: '', date: new Date().toISOString().slice(0, 10), time: '', service: '', duration: '60', status: 'Scheduled', notes: '' })
   const [saving, setSaving] = useState(false)
-  const [sendingId, setSendingId] = useState(null)
+  const [sendingId,      setSendingId]      = useState(null)
+  const [rescheduleBusy, setRescheduleBusy] = useState(null)
+
+  async function acceptReschedule(appt) {
+    if (!uid) return
+    setRescheduleBusy(appt.id)
+    try {
+      await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), {
+        date: appt.rescheduleDate, time: appt.rescheduleTime,
+        status: 'Confirmed', confirmationStatus: 'confirmed',
+        rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
+      })
+    } finally { setRescheduleBusy(null) }
+  }
+
+  async function declineReschedule(appt) {
+    if (!uid) return
+    setRescheduleBusy(appt.id)
+    try {
+      await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), {
+        confirmationStatus: null, rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
+      })
+    } finally { setRescheduleBusy(null) }
+  }
 
   async function save() {
     if (!uid || !form.date || !form.time) { alert('Date and time are required.'); return }
@@ -341,15 +364,23 @@ function Appointments() {
           {RETAIL_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
         </select>
         {r.confirmationStatus && (
-          <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-            r.confirmationStatus === 'confirmed'            ? 'bg-green-100 text-green-700' :
-            r.confirmationStatus === 'cancelled'            ? 'bg-red-100 text-red-600' :
-            r.confirmationStatus === 'reschedule-requested' ? 'bg-amber-100 text-amber-700' : ''
-          }`}>
-            {r.confirmationStatus === 'confirmed'            ? '✓ Customer confirmed' :
-             r.confirmationStatus === 'cancelled'            ? '✗ Customer cancelled' :
-             r.confirmationStatus === 'reschedule-requested' ? '⟳ Reschedule requested' : ''}
-          </span>
+          r.confirmationStatus === 'reschedule-requested' ? (
+            <div className="mt-1 space-y-1" onClick={e => e.stopPropagation()}>
+              <span className="block w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">⟳ Reschedule requested</span>
+              {r.rescheduleDate && <p className="text-[10px] text-ink-secondary">{r.rescheduleDate} {r.rescheduleTime || ''}</p>}
+              {r.rescheduleNote && <p className="text-[10px] italic text-ink-secondary">{r.rescheduleNote}</p>}
+              <div className="flex gap-1">
+                <button onClick={() => acceptReschedule(r)} disabled={rescheduleBusy === r.id}
+                  className="rounded px-2 py-0.5 text-[10px] font-semibold bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50 transition">Accept</button>
+                <button onClick={() => declineReschedule(r)} disabled={rescheduleBusy === r.id}
+                  className="rounded px-2 py-0.5 text-[10px] font-semibold bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 transition">Decline</button>
+              </div>
+            </div>
+          ) : (
+            <span className={`block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.confirmationStatus === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+              {r.confirmationStatus === 'confirmed' ? '✓ Customer confirmed' : '✗ Customer cancelled'}
+            </span>
+          )
         )}
       </div>
     )},
