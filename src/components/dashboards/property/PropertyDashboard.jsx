@@ -15,11 +15,14 @@ import { httpsCallable } from 'firebase/functions'
 import {
   PlusCircle, Trash2, MapPin, Eye, Pencil, List, TrendingUp, Download, X, Loader2, Wrench,
   AlertTriangle, CheckCircle2, Clock, Bell, Users as UsersIcon, FileText, Upload,
-  MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon,
+  MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon, Receipt, Mail,
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
+import SurveysModule from '../../shared/SurveysModule'
+import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
-import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer'
+import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer'
+import { fmtDate } from '../../../utils/dates'
 
 // ── Currency formatter ────────────────────────────────────────────────────────
 const fmt = n => `R ${Number(n ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -38,17 +41,21 @@ const ps = StyleSheet.create({
   totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
   totalValue: { fontFamily: 'Helvetica-Bold', fontSize: 10, color: '#5c9e8a' },
   footer: { position: 'absolute', bottom: 30, left: 40, right: 40, flexDirection: 'row', justifyContent: 'space-between', fontSize: 8, color: '#999' },
+  logo: { width: 44, height: 44, objectFit: 'contain', marginRight: 10 },
 })
 
 function OwnerStatementPDF({ data }) {
-  const { property, owner, month, rentCollected, commission, managementFee, expenses, netPayout, businessName, generatedAt } = data
+  const { property, owner, month, rentCollected, commission, managementFee, expenses, netPayout, businessName, businessLogoUrl, generatedAt } = data
   return (
     <Document>
       <Page size="A4" style={ps.page}>
         <View style={ps.header}>
-          <View>
-            <Text style={ps.brand}>{businessName || 'Tlhiso Property'}</Text>
-            <Text style={ps.sub}>Owner Statement</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {businessLogoUrl ? <Image src={businessLogoUrl} style={ps.logo} /> : null}
+            <View>
+              <Text style={ps.brand}>{businessName || 'Tlhiso Property'}</Text>
+              <Text style={ps.sub}>Owner Statement</Text>
+            </View>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={ps.sub}>Period: {month}</Text>
@@ -1231,6 +1238,7 @@ function OwnerStatements() {
       month: form.month,
       rentCollected, commission, managementFee, expenses, netPayout,
       businessName: profile?.businessName || profile?.name || 'Tlhiso Property',
+      businessLogoUrl: profile?.businessLogoUrl || '',
       generatedAt: new Date().toLocaleDateString('en-ZA'),
     }
     await addDoc(collection(db, 'users', uid, 'ownerStatements'), { ...data, createdAt: serverTimestamp() })
@@ -1245,7 +1253,7 @@ function OwnerStatements() {
     { key: 'rentCollected', label: 'Rent', render: r => fmt(r.rentCollected) },
     { key: 'netPayout', label: 'Net Payout', render: r => <span className="font-semibold text-primary">{fmt(r.netPayout)}</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
-      <button onClick={e => { e.stopPropagation(); downloadStatementPDF({ ...r, businessName: profile?.businessName || profile?.name || 'Tlhiso Property', generatedAt: new Date().toLocaleDateString('en-ZA') }) }}
+      <button onClick={e => { e.stopPropagation(); downloadStatementPDF({ ...r, businessName: profile?.businessName || profile?.name || 'Tlhiso Property', businessLogoUrl: profile?.businessLogoUrl || '', generatedAt: new Date().toLocaleDateString('en-ZA') }) }}
         className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light">
         <Download size={12} /> PDF
       </button>
@@ -1352,6 +1360,641 @@ function Maintenance() {
 
 
 
+// ── Invoices (Property) ───────────────────────────────────────────────────────
+// ── Property Invoice PDF ──────────────────────────────────────────────────────
+const invPs = StyleSheet.create({
+  page:        { padding: 48, fontSize: 9, fontFamily: 'Helvetica', color: '#1a1a1a' },
+  header:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, borderBottomWidth: 2, borderBottomColor: '#5B8E7D', paddingBottom: 16 },
+  brandBlock:  { flexDirection: 'row', alignItems: 'center' },
+  logo:        { width: 52, height: 52, objectFit: 'contain', marginRight: 12 },
+  brandName:   { fontSize: 16, fontFamily: 'Helvetica-Bold', color: '#5B8E7D' },
+  brandSub:    { fontSize: 8, color: '#64748B', marginTop: 2 },
+  invTitle:    { fontSize: 22, fontFamily: 'Helvetica-Bold', color: '#5B8E7D', textAlign: 'right' },
+  invMeta:     { fontSize: 8, color: '#64748B', marginTop: 3, textAlign: 'right' },
+  parties:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  partyBlock:  { width: '45%' },
+  partyLabel:  { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#5B8E7D', letterSpacing: 1, marginBottom: 5 },
+  partyName:   { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 2 },
+  partyLine:   { fontSize: 8, color: '#555', marginBottom: 1.5 },
+  thRow:       { flexDirection: 'row', backgroundColor: '#5B8E7D', paddingVertical: 6, paddingHorizontal: 10 },
+  thText:      { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#fff' },
+  tdRow:       { flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 10, borderBottomWidth: 0.5, borderBottomColor: '#e5e7eb' },
+  tdRowAlt:    { backgroundColor: '#f8faf9' },
+  colDesc:     { flex: 1 },
+  colNum:      { width: 36, textAlign: 'right' },
+  colPrice:    { width: 72, textAlign: 'right' },
+  totalsBlock: { marginTop: 12, marginLeft: 'auto', width: 210 },
+  totRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 4 },
+  totLabel:    { color: '#555' },
+  totValue:    { fontFamily: 'Helvetica-Bold' },
+  grandRow:    { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#5B8E7D', paddingVertical: 7, paddingHorizontal: 10, borderRadius: 4, marginTop: 4 },
+  grandLabel:  { fontFamily: 'Helvetica-Bold', fontSize: 10, color: '#fff' },
+  grandValue:  { fontFamily: 'Helvetica-Bold', fontSize: 10, color: '#fff' },
+  notes:       { marginTop: 18, borderLeftWidth: 3, borderLeftColor: '#5B8E7D', backgroundColor: '#f0f7f4', paddingVertical: 8, paddingHorizontal: 10 },
+  notesLabel:  { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#5B8E7D', letterSpacing: 1, marginBottom: 3 },
+  notesText:   { fontSize: 8, color: '#555' },
+  banking:     { marginTop: 18, padding: 12, backgroundColor: '#f0f7f4', borderRadius: 4 },
+  bankTitle:   { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#5B8E7D', letterSpacing: 1, marginBottom: 6 },
+  bankRow:     { flexDirection: 'row', marginBottom: 2.5 },
+  bankLabel:   { width: 110, color: '#555' },
+  bankValue:   { fontFamily: 'Helvetica-Bold' },
+  footer:      { position: 'absolute', bottom: 30, left: 48, right: 48, borderTopWidth: 0.5, borderTopColor: '#e5e7eb', paddingTop: 7, flexDirection: 'row', justifyContent: 'space-between', fontSize: 7, color: '#94A3B8' },
+})
+
+function PropertyInvoicePDF({ inv, profile: p }) {
+  const items = inv.items?.length
+    ? inv.items
+    : [{ desc: inv.description || '—', qty: 1, unitPrice: inv.amount || 0 }]
+  const subtotal = items.reduce((s, i) => s + Number(i.qty || 1) * Number(i.unitPrice || i.price || 0), 0)
+  const vat   = subtotal * 0.15
+  const total = subtotal + vat
+  const bd = p?.bankingDetails
+
+  return (
+    <Document>
+      <Page size="A4" style={invPs.page}>
+        {/* Header */}
+        <View style={invPs.header}>
+          <View style={invPs.brandBlock}>
+            {p?.businessLogoUrl ? <Image src={p.businessLogoUrl} style={invPs.logo} /> : null}
+            <View>
+              <Text style={invPs.brandName}>{p?.businessName || p?.name || 'Tlhiso'}</Text>
+              {p?.address    && <Text style={invPs.brandSub}>{p.address}</Text>}
+              {p?.phone      && <Text style={invPs.brandSub}>{p.phone}</Text>}
+              {p?.vatNumber  && <Text style={invPs.brandSub}>VAT Reg: {p.vatNumber}</Text>}
+            </View>
+          </View>
+          <View>
+            <Text style={invPs.invTitle}>TAX INVOICE</Text>
+            <Text style={invPs.invMeta}>Invoice #: {inv.invoiceNumber || '—'}</Text>
+            <Text style={invPs.invMeta}>Issue Date: {inv.issueDate || '—'}</Text>
+            <Text style={invPs.invMeta}>Due Date: {inv.dueDate || '—'}</Text>
+          </View>
+        </View>
+
+        {/* Bill To / Property */}
+        <View style={invPs.parties}>
+          <View style={invPs.partyBlock}>
+            <Text style={invPs.partyLabel}>BILL TO</Text>
+            <Text style={invPs.partyName}>{inv.tenantName || inv.tenant || '—'}</Text>
+            {inv.tenantEmail && <Text style={invPs.partyLine}>{inv.tenantEmail}</Text>}
+            {inv.tenantPhone && <Text style={invPs.partyLine}>{inv.tenantPhone}</Text>}
+            {inv.property    && <Text style={invPs.partyLine}>{inv.property}</Text>}
+          </View>
+          <View style={invPs.partyBlock}>
+            <Text style={invPs.partyLabel}>PROPERTY / REFERENCE</Text>
+            {inv.property    && <Text style={invPs.partyName}>{inv.property}</Text>}
+            {inv.description && <Text style={invPs.partyLine}>{inv.description}</Text>}
+          </View>
+        </View>
+
+        {/* Line-items table */}
+        <View style={invPs.thRow}>
+          <Text style={{ ...invPs.thText, flex: 1 }}>Description</Text>
+          <Text style={{ ...invPs.thText, ...invPs.colNum }}>Qty</Text>
+          <Text style={{ ...invPs.thText, ...invPs.colPrice }}>Unit Price</Text>
+          <Text style={{ ...invPs.thText, ...invPs.colPrice }}>Amount</Text>
+        </View>
+        {items.map((item, i) => (
+          <View key={i} style={i % 2 === 1 ? { ...invPs.tdRow, ...invPs.tdRowAlt } : invPs.tdRow}>
+            <Text style={{ flex: 1 }}>{item.desc || '—'}</Text>
+            <Text style={invPs.colNum}>{item.qty || 1}</Text>
+            <Text style={invPs.colPrice}>{fmt(item.unitPrice || item.price || 0)}</Text>
+            <Text style={{ ...invPs.colPrice, fontFamily: 'Helvetica-Bold' }}>
+              {fmt(Number(item.qty || 1) * Number(item.unitPrice || item.price || 0))}
+            </Text>
+          </View>
+        ))}
+
+        {/* Totals */}
+        <View style={invPs.totalsBlock}>
+          <View style={invPs.totRow}>
+            <Text style={invPs.totLabel}>Subtotal</Text>
+            <Text style={invPs.totValue}>{fmt(subtotal)}</Text>
+          </View>
+          <View style={invPs.totRow}>
+            <Text style={invPs.totLabel}>VAT (15%)</Text>
+            <Text style={invPs.totValue}>{fmt(vat)}</Text>
+          </View>
+          <View style={invPs.grandRow}>
+            <Text style={invPs.grandLabel}>TOTAL DUE</Text>
+            <Text style={invPs.grandValue}>{fmt(total)}</Text>
+          </View>
+        </View>
+
+        {/* Notes */}
+        {inv.notes ? (
+          <View style={invPs.notes}>
+            <Text style={invPs.notesLabel}>NOTES</Text>
+            <Text style={invPs.notesText}>{inv.notes}</Text>
+          </View>
+        ) : null}
+
+        {/* Banking details */}
+        {bd ? (
+          <View style={invPs.banking}>
+            <Text style={invPs.bankTitle}>PAYMENT DETAILS</Text>
+            {[
+              ['Bank',           bd.bankName],
+              ['Account Holder', bd.accountHolder],
+              ['Account Number', bd.accountNumber],
+              ['Branch Code',    bd.branchCode],
+              ['Account Type',   bd.accountType],
+              ['Reference',      inv.invoiceNumber || inv.tenantName || ''],
+            ].map(([k, v]) => (
+              <View key={k} style={invPs.bankRow}>
+                <Text style={invPs.bankLabel}>{k}</Text>
+                <Text style={invPs.bankValue}>{v}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={invPs.footer}>
+          <Text>Generated by Tlhiso — tlhiso.com</Text>
+          <Text>Thank you for your business</Text>
+        </View>
+      </Page>
+    </Document>
+  )
+}
+
+// ── Invoice-number helpers ────────────────────────────────────────────────────
+// Derive a 2-4 letter prefix from the business name.
+// "Tlhiso Property Management" → "TPM"
+// "Sunrise Realty"             → "SR"
+// "Boutique"                   → "BOU"
+function genInvoicePrefix(name = '') {
+  const STOP = new Set(['and','the','of','or','a','an','to','for','&','cc','pty','ltd','inc','npc','rf'])
+  const words = name.trim()
+    .split(/[\s\-_]+/)
+    .map(w => w.replace(/[^a-zA-Z]/g, ''))
+    .filter(w => w.length > 0 && !STOP.has(w.toLowerCase()))
+  if (words.length === 0) return 'INV'
+  if (words.length === 1) {
+    // Single word — take up to 3 significant chars
+    const w = words[0].toUpperCase()
+    return (w.replace(/[AEIOU]/g, '').slice(0, 3) || w.slice(0, 3)) || 'INV'
+  }
+  // Multi-word — first letter of each word, up to 4
+  return words.slice(0, 4).map(w => w[0].toUpperCase()).join('')
+}
+
+// Find the highest sequential number already used for this prefix+year,
+// then return the next one. Handles gaps and deletions correctly.
+function nextInvoiceNumber(invoices, prefix) {
+  const year = new Date().getFullYear()
+  const re   = new RegExp(`^${prefix}-${year}-(\\d+)$`)
+  let max = 0
+  invoices.forEach(inv => {
+    const m = (inv.invoiceNumber || '').match(re)
+    if (m) max = Math.max(max, parseInt(m[1], 10))
+  })
+  return `${prefix}-${year}-${String(max + 1).padStart(4, '0')}`
+}
+
+// ── PropertyInvoices ──────────────────────────────────────────────────────────
+const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Overdue']
+const INV_BLANK = {
+  invoiceNumber: '', issueDate: new Date().toISOString().slice(0, 10),
+  dueDate: '', tenantId: '', description: '',
+  items: [{ desc: '', qty: 1, unitPrice: '' }],
+  notes: '', status: 'Draft',
+}
+
+function PropertyInvoices() {
+  const { user, profile } = useAuth()
+  const uid      = user?.uid
+  const invoices = useCollection(uid ? `users/${uid}/invoices` : null)
+  const tenants  = useCollection(uid ? `users/${uid}/tenants`  : null)
+
+  const [open,        setOpen]        = useState(false)
+  const [editing,     setEditing]     = useState(null)
+  const [viewing,     setViewing]     = useState(null)
+  const [emailModal,  setEmailModal]  = useState(null)
+  const [emailTo,     setEmailTo]     = useState('')
+  const [form,        setForm]        = useState(INV_BLANK)
+  const [saving,      setSaving]      = useState(false)
+  const [downloading, setDownloading] = useState(null)
+  const [emailing,    setEmailing]    = useState(false)
+
+  const subtotal = form.items.reduce((s, i) => s + Number(i.qty || 1) * Number(i.unitPrice || 0), 0)
+  const vat   = subtotal * 0.15
+  const total = subtotal + vat
+
+  function openNew() {
+    setEditing(null)
+    setForm({
+      ...INV_BLANK,
+      invoiceNumber: nextInvoiceNumber(invoices, genInvoicePrefix(profile?.businessName || profile?.name)),
+      issueDate: new Date().toISOString().slice(0, 10),
+    })
+    setOpen(true)
+  }
+
+  function openEdit(inv) {
+    setEditing(inv)
+    setForm({
+      invoiceNumber: inv.invoiceNumber || '',
+      issueDate:     inv.issueDate     || new Date().toISOString().slice(0, 10),
+      dueDate:       inv.dueDate       || '',
+      tenantId:      inv.tenantId      || '',
+      description:   inv.description   || '',
+      items: inv.items?.length ? inv.items.map(i => ({ desc: i.desc || '', qty: i.qty || 1, unitPrice: i.unitPrice ?? i.price ?? '' })) : [{ desc: '', qty: 1, unitPrice: '' }],
+      notes:  inv.notes  || '',
+      status: inv.status || 'Draft',
+    })
+    setOpen(true)
+  }
+
+  function setItem(idx, key, val) {
+    setForm(f => { const items = [...f.items]; items[idx] = { ...items[idx], [key]: val }; return { ...f, items } })
+  }
+
+  async function save() {
+    if (!uid || !form.dueDate) { alert('Due date is required.'); return }
+    setSaving(true)
+    try {
+      const tenant  = tenants.find(t => t.id === form.tenantId)
+      const items   = form.items.filter(i => i.desc || Number(i.unitPrice) > 0)
+      const sub     = items.reduce((s, i) => s + Number(i.qty || 1) * Number(i.unitPrice || 0), 0)
+      const v       = sub * 0.15
+      const data    = {
+        invoiceNumber: form.invoiceNumber,
+        issueDate:     form.issueDate,
+        dueDate:       form.dueDate,
+        tenantId:      form.tenantId,
+        tenantName:    tenant ? `${tenant.firstName} ${tenant.lastName}` : '',
+        tenantEmail:   tenant?.email   || '',
+        tenantPhone:   tenant?.phone   || '',
+        property:      tenant?.property || '',
+        description:   form.description,
+        items, subtotal: sub, vat: v, total: sub + v,
+        notes: form.notes, status: form.status,
+      }
+      if (editing) {
+        await updateDoc(doc(db, 'users', uid, 'invoices', editing.id), data)
+      } else {
+        await addDoc(collection(db, 'users', uid, 'invoices'), { ...data, createdAt: serverTimestamp() })
+      }
+      setOpen(false); setEditing(null)
+    } finally { setSaving(false) }
+  }
+
+  async function handleDownloadPDF(inv) {
+    setDownloading(inv.id)
+    try {
+      const blob = await pdf(<PropertyInvoicePDF inv={inv} profile={profile} />).toBlob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = `Invoice_${inv.invoiceNumber || inv.id}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+    } finally { setDownloading(null) }
+  }
+
+  async function handleEmail() {
+    if (!emailModal || !emailTo.trim()) { alert('Please enter a recipient email.'); return }
+    setEmailing(true)
+    try {
+      const blob   = await pdf(<PropertyInvoicePDF inv={emailModal} profile={profile} />).toBlob()
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(blob)
+      })
+      await httpsCallable(functions, 'sendEmail')({
+        to:       emailTo,
+        subject:  `Invoice ${emailModal.invoiceNumber} — ${profile?.businessName || profile?.name}`,
+        htmlBody: `<p>Dear ${emailModal.tenantName || 'Tenant'},</p><p>Please find attached invoice <strong>${emailModal.invoiceNumber}</strong> for <strong>${fmt(emailModal.total)}</strong>, due on <strong>${emailModal.dueDate}</strong>.</p><p>Please use your invoice number as the payment reference.</p><p>Kind regards,<br><strong>${profile?.businessName || profile?.name}</strong></p>`,
+        attachments: [{ content: base64, filename: `Invoice_${emailModal.invoiceNumber}.pdf`, type: 'application/pdf', disposition: 'attachment' }],
+      })
+      if (emailModal.status === 'Draft') {
+        await updateDoc(doc(db, 'users', uid, 'invoices', emailModal.id), { status: 'Sent' })
+      }
+      setEmailModal(null); setEmailTo('')
+    } catch (e) { alert(`Send failed: ${e.message}`) }
+    finally { setEmailing(false) }
+  }
+
+  const statusBadge = s => ({
+    Draft:   'bg-gray-100 text-gray-600',
+    Sent:    'bg-blue-100 text-blue-700',
+    Paid:    'bg-green-100 text-green-700',
+    Overdue: 'bg-red-100 text-red-600',
+  }[s] ?? 'bg-gray-100 text-gray-600')
+
+  const outstanding   = invoices.filter(i => i.status === 'Sent' || i.status === 'Overdue')
+  const totalOutstand = outstanding.reduce((s, i) => s + Number(i.total ?? 0), 0)
+  const totalPaid     = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + Number(i.total ?? 0), 0)
+  const overdue       = invoices.filter(i => i.status === 'Overdue').length
+
+  const cols = [
+    { key: 'invoiceNumber', label: 'Invoice #', render: r => <span className="font-mono text-xs font-semibold text-ink">{r.invoiceNumber || '—'}</span> },
+    { key: 'tenantName',    label: 'Tenant'   },
+    { key: 'property',      label: 'Property' },
+    { key: 'total',         label: 'Amount',   render: r => <span className="font-semibold">{fmt(r.total || 0)}</span> },
+    { key: 'dueDate',       label: 'Due Date', render: r => fmtDate(r.dueDate) },
+    { key: 'status',        label: 'Status',   render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadge(r.status)}`}>{r.status}</span> },
+    { key: 'actions', label: '', sortable: false, render: r => (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <button onClick={() => setViewing(r)} title="View" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
+        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Pencil size={14} /></button>
+        <button onClick={() => handleDownloadPDF(r)} disabled={downloading === r.id} title="Download PDF"
+          className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+          {downloading === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        </button>
+        <button onClick={() => { setEmailModal(r); setEmailTo(r.tenantEmail || '') }} title="Email"
+          className="rounded p-1 text-blue-500 hover:bg-blue-50"><Mail size={14} /></button>
+        <button onClick={() => { if (!window.confirm('Delete this invoice?')) return; deleteDoc(doc(db, 'users', uid, 'invoices', r.id)) }}
+          title="Delete" className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+      </div>
+    )},
+  ]
+
+  return (
+    <div className="space-y-5">
+      <PageHead title="Invoices" subtitle="Professional tax invoices for tenants and owners"
+        action={<AddButton onClick={openNew}><PlusCircle size={15} /> New Invoice</AddButton>} />
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard label="Total Invoices"  value={invoices.length}     icon="🧾" />
+        <StatCard label="Outstanding"     value={outstanding.length}  icon="⏳" color="orange"
+          trend={fmt(totalOutstand)} trendTone={outstanding.length ? 'down' : 'up'} />
+        <StatCard label="Collected"       value={fmt(totalPaid)}      icon="💰" color="primary" />
+        <StatCard label="Overdue"         value={overdue}             icon="🚨" color="red"
+          trend={overdue ? 'Needs attention' : 'None'} trendTone={overdue ? 'down' : 'up'} />
+      </div>
+
+      <DataTable columns={cols} data={invoices} emptyMessage="No invoices yet. Click 'New Invoice' to get started." />
+
+      {/* ── Create / Edit modal ── */}
+      <Modal open={open} onClose={() => { setOpen(false); setEditing(null) }}
+        title={editing ? `Edit ${editing.invoiceNumber}` : 'New Invoice'} size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Invoice Number" value={form.invoiceNumber}
+              onChange={e => setForm(f => ({ ...f, invoiceNumber: e.target.value }))} />
+            <Field label="Status" select value={form.status}
+              onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+              {INVOICE_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Issue Date" type="date" value={form.issueDate}
+              onChange={e => setForm(f => ({ ...f, issueDate: e.target.value }))} />
+            <Field label="Due Date *" type="date" value={form.dueDate}
+              onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} />
+          </div>
+          <Field label="Tenant" select value={form.tenantId}
+            onChange={e => setForm(f => ({ ...f, tenantId: e.target.value }))}>
+            <option value="">Select tenant…</option>
+            {tenants.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName} — {t.property}</option>)}
+          </Field>
+          <Field label="Description / Reference" value={form.description}
+            placeholder="e.g. Monthly rent — January 2026"
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+
+          {/* Line items */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink-secondary">Line Items</span>
+              <button onClick={() => setForm(f => ({ ...f, items: [...f.items, { desc: '', qty: 1, unitPrice: '' }] }))}
+                className="text-xs font-semibold text-primary hover:underline">+ Add line</button>
+            </div>
+            <div className="overflow-hidden rounded-xl border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-2">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-ink-secondary">Description</th>
+                    <th className="w-16 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Qty</th>
+                    <th className="w-28 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Unit Price</th>
+                    <th className="w-24 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Amount</th>
+                    <th className="w-8 px-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((item, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-2 py-1.5">
+                        <input value={item.desc} onChange={e => setItem(i, 'desc', e.target.value)}
+                          placeholder="e.g. Monthly rent"
+                          className="w-full rounded border border-border px-2 py-1 text-xs outline-none focus:border-primary" />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" min="1" value={item.qty} onChange={e => setItem(i, 'qty', e.target.value)}
+                          className="w-full rounded border border-border px-2 py-1 text-right text-xs outline-none focus:border-primary" />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" min="0" step="0.01" value={item.unitPrice}
+                          onChange={e => setItem(i, 'unitPrice', e.target.value)} placeholder="0.00"
+                          className="w-full rounded border border-border px-2 py-1 text-right text-xs outline-none focus:border-primary" />
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-semibold">
+                        {fmt(Number(item.qty || 1) * Number(item.unitPrice || 0))}
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        {form.items.length > 1 && (
+                          <button onClick={() => setForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }))}
+                            className="text-red-400 hover:text-red-600"><X size={13} /></button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-2 space-y-1 rounded-xl bg-surface-2 p-3 text-xs">
+              <div className="flex justify-between text-ink-secondary"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+              <div className="flex justify-between text-ink-secondary"><span>VAT (15%)</span><span>{fmt(vat)}</span></div>
+              <div className="flex justify-between border-t border-border pt-1 font-bold text-primary"><span>Total</span><span>{fmt(total)}</span></div>
+            </div>
+          </div>
+
+          <Field label="Notes" textarea value={form.notes}
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="Payment terms, references, or additional notes…" />
+
+          <div className="border-t border-border pt-4">
+            <button onClick={save} disabled={saving}
+              className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d] disabled:opacity-60">
+              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Invoice'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Invoice view / preview modal ── */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="" size="lg">
+        {viewing && (
+          <div className="-m-6">
+            {/* Action bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-2 px-5 py-3">
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadge(viewing.status)}`}>{viewing.status}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setViewing(null); openEdit(viewing) }}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold hover:bg-surface-2">
+                  <Pencil size={13} /> Edit
+                </button>
+                <button onClick={() => handleDownloadPDF(viewing)} disabled={downloading === viewing.id}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4e7d6d] disabled:opacity-60">
+                  {downloading === viewing.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
+                </button>
+                <button onClick={() => { setEmailModal(viewing); setEmailTo(viewing.tenantEmail || ''); setViewing(null) }}
+                  className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">
+                  <Mail size={13} /> Email
+                </button>
+              </div>
+            </div>
+
+            {/* Preview body */}
+            <div className="overflow-y-auto p-6" style={{ maxHeight: '76vh' }}>
+              {/* Logo + TAX INVOICE */}
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-primary/30 pb-5">
+                <div className="flex items-center gap-3">
+                  {profile?.businessLogoUrl && (
+                    <img src={profile.businessLogoUrl} alt="Logo"
+                      className="h-16 w-16 rounded-xl border border-border object-contain p-1" />
+                  )}
+                  <div>
+                    <p className="text-lg font-extrabold text-primary">{profile?.businessName || profile?.name}</p>
+                    {profile?.address   && <p className="text-xs text-ink-secondary">{profile.address}</p>}
+                    {profile?.phone     && <p className="text-xs text-ink-secondary">{profile.phone}</p>}
+                    {profile?.vatNumber && <p className="text-xs text-ink-secondary">VAT Reg: {profile.vatNumber}</p>}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-3xl font-extrabold tracking-widest text-primary">TAX INVOICE</p>
+                  <p className="mt-1 text-xs text-ink-secondary">Invoice #: <strong className="text-ink">{viewing.invoiceNumber}</strong></p>
+                  <p className="text-xs text-ink-secondary">Issue Date: <strong className="text-ink">{viewing.issueDate}</strong></p>
+                  <p className="text-xs text-ink-secondary">Due Date: <strong className="text-ink">{viewing.dueDate}</strong></p>
+                </div>
+              </div>
+
+              {/* Bill To / Property */}
+              <div className="mt-5 grid grid-cols-2 gap-6">
+                <div>
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-primary">Bill To</p>
+                  <p className="font-bold text-ink">{viewing.tenantName || '—'}</p>
+                  {viewing.tenantEmail && <p className="text-xs text-ink-secondary">{viewing.tenantEmail}</p>}
+                  {viewing.tenantPhone && <p className="text-xs text-ink-secondary">{viewing.tenantPhone}</p>}
+                  {viewing.property    && <p className="text-xs text-ink-secondary">{viewing.property}</p>}
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-primary">Property / Reference</p>
+                  {viewing.property    && <p className="font-bold text-ink">{viewing.property}</p>}
+                  {viewing.description && <p className="text-xs text-ink-secondary">{viewing.description}</p>}
+                </div>
+              </div>
+
+              {/* Line items */}
+              <div className="mt-5 overflow-hidden rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-primary text-white">
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold">Description</th>
+                      <th className="w-16 px-4 py-2.5 text-right text-xs font-semibold">Qty</th>
+                      <th className="w-28 px-4 py-2.5 text-right text-xs font-semibold">Unit Price</th>
+                      <th className="w-28 px-4 py-2.5 text-right text-xs font-semibold">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(viewing.items?.length
+                      ? viewing.items
+                      : [{ desc: viewing.description, qty: 1, unitPrice: viewing.amount }]
+                    ).map((item, i) => (
+                      <tr key={i} className={`border-t border-border ${i % 2 === 1 ? 'bg-surface-2/50' : ''}`}>
+                        <td className="px-4 py-2">{item.desc || '—'}</td>
+                        <td className="px-4 py-2 text-right">{item.qty || 1}</td>
+                        <td className="px-4 py-2 text-right">{fmt(item.unitPrice ?? item.price ?? 0)}</td>
+                        <td className="px-4 py-2 text-right font-semibold">
+                          {fmt(Number(item.qty || 1) * Number(item.unitPrice ?? item.price ?? 0))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals */}
+              <div className="ml-auto mt-4 max-w-xs space-y-1">
+                <div className="flex justify-between text-sm text-ink-secondary">
+                  <span>Subtotal</span><span>{fmt(viewing.subtotal ?? viewing.amount ?? 0)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-ink-secondary">
+                  <span>VAT (15%)</span><span>{fmt(viewing.vat ?? 0)}</span>
+                </div>
+                <div className="flex justify-between rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">
+                  <span>TOTAL DUE</span><span>{fmt(viewing.total ?? 0)}</span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              {viewing.notes && (
+                <div className="mt-5 rounded-xl border-l-4 border-primary bg-primary-light px-4 py-3">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-primary">Notes</p>
+                  <p className="text-xs text-ink-secondary">{viewing.notes}</p>
+                </div>
+              )}
+
+              {/* Banking details */}
+              {profile?.bankingDetails && (
+                <div className="mt-5 rounded-xl bg-surface-2 p-4">
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-primary">Payment Details</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                    {[
+                      ['Bank',           profile.bankingDetails.bankName],
+                      ['Account Holder', profile.bankingDetails.accountHolder],
+                      ['Account Number', profile.bankingDetails.accountNumber],
+                      ['Branch Code',    profile.bankingDetails.branchCode],
+                      ['Account Type',   profile.bankingDetails.accountType],
+                      ['Reference',      viewing.invoiceNumber || viewing.tenantName || ''],
+                    ].flatMap(([k, v]) => [
+                      <span key={`k-${k}`} className="text-ink-secondary">{k}</span>,
+                      <span key={`v-${k}`} className="font-semibold">{v}</span>,
+                    ])}
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-5 text-center text-[10px] text-ink-secondary">
+                Generated by Tlhiso — tlhiso.com · Thank you for your business
+              </p>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Email modal ── */}
+      <Modal open={!!emailModal} onClose={() => { setEmailModal(null); setEmailTo('') }} title="Email Invoice">
+        {emailModal && (
+          <div className="space-y-4">
+            <div className="rounded-xl bg-surface-2 px-4 py-3 text-xs">
+              <span className="text-ink-secondary">Invoice: </span>
+              <span className="font-semibold">{emailModal.invoiceNumber}</span>
+              <span className="mx-2 text-ink-secondary">·</span>
+              <span className="font-semibold text-primary">{fmt(emailModal.total)}</span>
+              <span className="mx-2 text-ink-secondary">due</span>
+              <span className="font-semibold">{emailModal.dueDate}</span>
+            </div>
+            <Field label="Recipient Email *" type="email" value={emailTo}
+              onChange={e => setEmailTo(e.target.value)}
+              placeholder={emailModal.tenantEmail || 'tenant@email.com'} />
+            <p className="text-xs text-ink-secondary">
+              The invoice PDF will be attached. Status will update to <strong>Sent</strong> automatically.
+            </p>
+            <button onClick={handleEmail} disabled={emailing}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+              {emailing
+                ? <><Loader2 size={15} className="animate-spin" /> Sending…</>
+                : <><Mail size={15} /> Send Invoice</>}
+            </button>
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
 // ── Appointments (Property) ───────────────────────────────────────────────────
 const PROP_APPT_STATUS = ['Scheduled', 'Confirmed', 'Completed', 'Cancelled', 'No-show']
 
@@ -1361,7 +2004,7 @@ function PropertyAppointments() {
   const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
   const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', status: 'Scheduled', notes: '' })
+  const [form, setForm] = useState({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', location: '', status: 'Scheduled', notes: '' })
   const [saving, setSaving] = useState(false)
   const [sendingId, setSendingId] = useState(null)
 
@@ -1376,7 +2019,7 @@ function PropertyAppointments() {
         customerPhone: tenant?.phone ?? '',
         createdAt: serverTimestamp(),
       })
-      setForm({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', status: 'Scheduled', notes: '' })
+      setForm({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', location: '', status: 'Scheduled', notes: '' })
       setOpen(false)
     } finally { setSaving(false) }
   }
@@ -1396,10 +2039,16 @@ function PropertyAppointments() {
   const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-surface-2 text-ink-secondary')
 
   const cols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'time', label: 'Time' },
     { key: 'customer', label: 'Tenant' },
     { key: 'purpose', label: 'Purpose' },
+    { key: 'location', label: 'Location', render: r => r.location ? (
+      <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.location)}`} target="_blank" rel="noreferrer"
+        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+        <MapPin size={12} /> {r.location}
+      </a>
+    ) : <span className="text-xs text-ink-secondary">—</span> },
     { key: 'status', label: 'Status', render: r => (
       <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
         className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
@@ -1419,9 +2068,16 @@ function PropertyAppointments() {
 
   return (
     <div className="space-y-4">
-      <PageHead title="Appointments" subtitle="Schedule inspections, viewings & meetings"
-        action={<AddButton onClick={() => setOpen(true)}>Book Appointment</AddButton>} />
-      <DataTable columns={cols} data={appointments} emptyMessage="No appointments yet." />
+      <AppointmentCalendar
+        appointments={appointments}
+        onSlotClick={(ds, h) => { setForm(f => ({ ...f, date: ds, time: `${String(h).padStart(2, '0')}:00` })); setOpen(true) }}
+        onApptClick={() => {}}
+        listColumns={cols}
+        title="Appointments"
+        subtitle="Schedule inspections, viewings & meetings"
+        headerAction={<AddButton onClick={() => setOpen(true)}>Book Appointment</AddButton>}
+        emptyMessage="No appointments yet."
+      />
       <Modal open={open} onClose={() => setOpen(false)} title="Book Appointment">
         <div className="space-y-4">
           <Field label="Tenant (optional)" select value={form.tenantId} onChange={e => setForm(f => ({ ...f, tenantId: e.target.value }))}>
@@ -1433,6 +2089,7 @@ function PropertyAppointments() {
             <Field label="Time *" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
           </div>
           <Field label="Purpose" value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} placeholder="e.g. Inspection, Viewing, Signing" />
+          <Field label="Location (address)" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="e.g. 12 Main Street, Sandton" />
           <Field label="Status" select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
             {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
           </Field>
@@ -1570,6 +2227,7 @@ export default function PropertyDashboard() {
         <Route path="tenants" element={<Tenants />} />
         <Route path="rent-roll" element={<RentRoll />} />
         <Route path="statements" element={<OwnerStatements />} />
+        <Route path="invoices"   element={<PropertyInvoices />} />
         <Route path="maintenance" element={<Maintenance />} />
         <Route path="appointments" element={<PropertyAppointments />} />
         <Route path="messages" element={<Messages />} />
