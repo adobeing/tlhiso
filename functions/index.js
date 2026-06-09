@@ -1,9 +1,27 @@
-const { onCall, onRequest } = require('firebase-functions/v2/https')
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
+const crypto = require('crypto')
 const { onDocumentCreated } = require('firebase-functions/v2/firestore')
+const { onSchedule } = require('firebase-functions/v2/scheduler')
 const admin = require('firebase-admin')
+
+const SUPER_ADMIN_EMAIL = 'admin@adobeing.com'
+
+function requireAuth(req) {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'You must be signed in to call this function.')
+}
+
+function requireSuperAdmin(req) {
+  requireAuth(req)
+  const email = req.auth.token?.email
+  const isAdmin = email === SUPER_ADMIN_EMAIL || req.auth.token?.isAdmin === true
+  if (!isAdmin) throw new HttpsError('permission-denied', 'Super admin access required.')
+}
+
 const sgMail = require('@sendgrid/mail')
 const axios = require('axios')
 const twilio = require('twilio')
+const { SpeechClient } = require('@google-cloud/speech')
+const speechClient = new SpeechClient()
 
 admin.initializeApp()
 const db = admin.firestore()
@@ -23,8 +41,12 @@ const getConfig = () => ({
 })
 
 // ── 1. sendEmail ──────────────────────────────────────────────────────────────
+// Accepts an optional `attachments` array (e.g. a branded PDF report) and
+// forwards it to SendGrid. Attachment shape:
+//   { content: <base64, no data: prefix>, filename, type, disposition }
 exports.sendEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (req) => {
-  const { to, subject, htmlBody, templateId } = req.data
+  requireAuth(req)
+  const { to, subject, htmlBody, templateId, attachments } = req.data
   if (!to || !htmlBody) return { success: false, error: 'Missing to or htmlBody' }
   const cfg = getConfig()
   sgMail.setApiKey(cfg.sendgridKey)
@@ -36,6 +58,14 @@ exports.sendEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (req) => {
       html: htmlBody,
     }
     if (templateId) msg.templateId = templateId
+    if (Array.isArray(attachments) && attachments.length) {
+      msg.attachments = attachments.map(a => ({
+        content: a.content,                       // base64 string, no data: prefix
+        filename: a.filename || 'attachment.pdf',
+        type: a.type || 'application/pdf',
+        disposition: a.disposition || 'attachment',
+      }))
+    }
     await sgMail.send(msg)
     return { success: true }
   } catch (e) {
@@ -48,6 +78,7 @@ exports.sendEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (req) => {
 exports.sendSMS = onCall({
   secrets: ['BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET'],
 }, async (req) => {
+  requireAuth(req)
   const { to, message } = req.data
   if (!to || !message) return { success: false, error: 'Missing to or message' }
   const cfg = getConfig()
@@ -73,6 +104,7 @@ exports.sendSMS = onCall({
 exports.sendWhatsApp = onCall({
   secrets: ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_WHATSAPP_NUMBER'],
 }, async (req) => {
+  requireAuth(req)
   const { to, message } = req.data
   if (!to || !message) return { success: false, error: 'Missing to or message' }
   const cfg = getConfig()
@@ -92,32 +124,44 @@ exports.sendWhatsApp = onCall({
 })
 
 // ── 4. transcribeConsultation ─────────────────────────────────────────────────
-exports.transcribeConsultation = onCall(async (req) => {
+// Uses Google Cloud Speech-to-Text — no API key needed, authenticates via
+// the Cloud Function's service account (same GCP project).
+// Enable the API first: console.cloud.google.com → APIs → Cloud Speech-to-Text API
+exports.transcribeConsultation = onCall({ timeoutSeconds: 540 }, async (req) => {
+  requireAuth(req)
   const { storagePath } = req.data
   if (!storagePath) return { success: false, error: 'Missing storagePath' }
-  const ASSEMBLY_KEY = process.env.ASSEMBLYAI_API_KEY
-  if (!ASSEMBLY_KEY) return { success: false, error: 'AssemblyAI key not configured' }
+
+  // Derive encoding from file extension recorded by MedicalDashboard
+  const ext      = storagePath.split('.').pop().toLowerCase()
+  const encoding = { webm: 'WEBM_OPUS', ogg: 'OGG_OPUS', mp3: 'MP3', mpeg: 'MP3' }[ext] || 'WEBM_OPUS'
+  const sampleRateHertz = ['WEBM_OPUS', 'OGG_OPUS'].includes(encoding) ? 48000 : undefined
+
   try {
-    const bucket = storage.bucket()
-    const file = bucket.file(storagePath)
-    const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 1000 * 60 * 10 })
-    // Submit to AssemblyAI
-    const submitResp = await axios.post(
-      'https://api.assemblyai.com/v2/transcript',
-      { audio_url: url },
-      { headers: { authorization: ASSEMBLY_KEY } }
-    )
-    const transcriptId = submitResp.data.id
-    // Poll until complete (max 2 mins)
-    for (let i = 0; i < 24; i++) {
-      await new Promise(r => setTimeout(r, 5000))
-      const poll = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-        headers: { authorization: ASSEMBLY_KEY },
-      })
-      if (poll.data.status === 'completed') return { success: true, transcript: poll.data.text }
-      if (poll.data.status === 'error') throw new Error(poll.data.error)
-    }
-    return { success: false, error: 'Transcription timed out' }
+    const bucketName = storage.bucket().name
+    const gcsUri    = `gs://${bucketName}/${storagePath}`
+
+    const [operation] = await speechClient.longRunningRecognize({
+      config: {
+        encoding,
+        ...(sampleRateHertz && { sampleRateHertz }),
+        audioChannelCount:          encoding === 'WEBM_OPUS' ? 2 : 1,
+        languageCode:             'en-ZA',
+        enableAutomaticPunctuation: true,
+        model:                    'latest_long',
+        useEnhanced:              true,
+      },
+      audio: { uri: gcsUri },
+    })
+
+    const [response] = await operation.promise()
+    const transcript = response.results
+        .map(r => r.alternatives[0]?.transcript ?? '')
+        .join(' ')
+        .trim()
+
+    if (!transcript) return { success: false, error: 'No speech detected in audio' }
+    return { success: true, transcript }
   } catch (e) {
     console.error('transcribeConsultation error', e.message)
     return { success: false, error: e.message }
@@ -171,8 +215,273 @@ exports.notifyOnUserCreated = onDocumentCreated(
   }
 )
 
-// ── 6. sendActivationEmail (called from super admin) ─────────────────────────
+// ── 7. processScheduledCampaigns (runs every 5 minutes) ──────────────────────
+// Queries all users' campaigns where status == 'Scheduled' and
+// scheduledFor <= now, resolves recipients server-side, sends via the same
+// SendGrid / BulkSMS / Twilio logic, then updates the campaign doc.
+// Throttles against each user's plan message limit.
+
+// Campaign-only message quotas. Operational messages (booking confirmations,
+// appointment reminders) are sent outside the scheduler and do NOT consume quota.
+const PLAN_LIMITS = { starter: 1000, business: 3000, enterprise: 10000 }
+
+const CONTACT_COLLECTION = {
+  medical:  'patients',
+  b2b:      'customers',
+  property: 'tenants',
+  retail:   'customers',
+}
+
+function getContactName(c, industry) {
+  if (industry === 'medical' || industry === 'property') {
+    return [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || ''
+  }
+  if (industry === 'b2b') return c.company || c.name || c.email || ''
+  return c.name || c.email || ''
+}
+
+function normPhone(raw) {
+  if (!raw) return null
+  const d = String(raw).replace(/\D/g, '')
+  if (d.startsWith('27') && d.length === 11) return '+' + d
+  if (d.startsWith('0') && d.length === 10)  return '+27' + d.slice(1)
+  if (d.length === 9) return '+27' + d
+  return '+' + d
+}
+
+function resolveRecipients(contacts, segDef, channel, industry, recentApptNames) {
+  let pool = contacts.slice()
+
+  if (segDef.mode === 'tagged' && segDef.tags?.length > 0) {
+    pool = contacts.filter(c =>
+      Array.isArray(c.tags) && segDef.tags.some(t => c.tags.includes(t))
+    )
+  } else if (segDef.mode === 'custom' && segDef.filters?.length > 0) {
+    pool = contacts.filter(c =>
+      segDef.filters.every(fKey => {
+        switch (fKey) {
+          case 'has_email':        return !!c.email
+          case 'has_phone':        return !!c.phone
+          case 'no_recent_appt':   return !recentApptNames.has(getContactName(c, industry))
+          case 'has_chronic':      return Array.isArray(c.chronicConditions) && c.chronicConditions.length > 0
+          case 'has_medical_aid':  return !!c.medicalAid
+          case 'no_medical_aid':   return !c.medicalAid
+          case 'lease_ending_60': {
+            if (!c.leaseEnd) return false
+            const diff = (new Date(c.leaseEnd) - new Date()) / 86400000
+            return diff >= 0 && diff <= 60
+          }
+          case 'lease_ending_30': {
+            if (!c.leaseEnd) return false
+            const diff = (new Date(c.leaseEnd) - new Date()) / 86400000
+            return diff >= 0 && diff <= 30
+          }
+          case 'birthday_month': {
+            const raw = c.birthday || c.dob
+            if (!raw) return false
+            return new Date(raw).getMonth() === new Date().getMonth()
+          }
+          default: return true
+        }
+      })
+    )
+  }
+
+  // Exclude opted-out contacts
+  pool = pool.filter(c => c.marketingOptOut !== true)
+
+  // Filter by channel contact requirement
+  return pool.filter(c => channel === 'email' ? !!c.email : !!c.phone)
+}
+
+exports.processScheduledCampaigns = onSchedule(
+  {
+    schedule: 'every 5 minutes',
+    secrets: [
+      'SENDGRID_API_KEY',
+      'BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET',
+      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_WHATSAPP_NUMBER',
+    ],
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now()
+    const cfg = getConfig()
+
+    // Query all scheduled campaigns across all users due now
+    const snap = await db.collectionGroup('campaigns')
+      .where('status', '==', 'Scheduled')
+      .where('scheduledFor', '<=', now)
+      .get()
+
+    if (snap.empty) return
+
+    console.log(`[scheduler] ${snap.size} scheduled campaign(s) due`)
+
+    for (const campDoc of snap.docs) {
+      const camp = campDoc.data()
+      const uid  = campDoc.ref.parent.parent?.id
+      if (!uid) continue
+
+      try {
+        // Load user doc for plan limits
+        const userSnap = await db.doc(`users/${uid}`).get()
+        const userData  = userSnap.data() ?? {}
+        const planKey   = userData.plan ?? 'starter'
+        const limit     = PLAN_LIMITS[planKey] ?? 100
+        const used      = userData.messagesUsed ?? 0
+        const remaining = limit - used
+
+        if (remaining <= 0) {
+          await campDoc.ref.update({ status: 'QuotaExceeded', processedAt: admin.firestore.Timestamp.now() })
+          console.log(`[scheduler] uid=${uid} quota exhausted, skipping campaign ${campDoc.id}`)
+          continue
+        }
+
+        // Mark as Sending immediately to prevent double-processing
+        await campDoc.ref.update({ status: 'Sending' })
+
+        const industry = camp.industry
+        const channel  = camp.channel
+        const segDef   = camp.segmentDefinition ?? { mode: 'all', tags: [], filters: [] }
+        const body     = camp.body ?? ''
+
+        // Load contacts
+        const contactCol = CONTACT_COLLECTION[industry] ?? 'customers'
+        const contactSnap = await db.collection(`users/${uid}/${contactCol}`).get()
+        const contacts    = contactSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+        // Load recent appointments for no_recent_appt filter
+        let recentApptNames = new Set()
+        if (segDef.filters?.includes('no_recent_appt')) {
+          const cutoff = new Date()
+          cutoff.setDate(cutoff.getDate() - 90)
+          const cutoffStr = cutoff.toISOString().slice(0, 10)
+          const apptSnap = await db.collection(`users/${uid}/appointments`)
+            .where('date', '>=', cutoffStr).get()
+          apptSnap.docs.forEach(d => {
+            const a = d.data()
+            if (a.patient) recentApptNames.add(a.patient)
+          })
+        }
+
+        // Resolve recipients and respect remaining quota
+        let recipients = resolveRecipients(contacts, segDef, channel, industry, recentApptNames)
+        if (recipients.length > remaining) {
+          recipients = recipients.slice(0, remaining)
+        }
+
+        let sent = 0, failed = 0
+
+        for (const contact of recipients) {
+          const name    = getContactName(contact, industry)
+          const msgBody = body.replace(/\{name\}/gi, name)
+
+          try {
+            if (channel === 'email') {
+              sgMail.setApiKey(cfg.sendgridKey)
+              await sgMail.send({
+                to:      contact.email,
+                from:    { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+                subject: camp.subject || 'Message from your service',
+                html:    msgBody,
+              })
+            } else if (channel === 'sms') {
+              const to = normPhone(contact.phone)
+              await axios.post(
+                'https://api.bulksms.com/v1/messages',
+                [{ to, body: msgBody }],
+                { auth: { username: cfg.bulksmsTokenId, password: cfg.bulksmsTokenSecret } }
+              )
+            } else if (channel === 'whatsapp') {
+              const client = twilio(cfg.twilioSid, cfg.twilioToken)
+              const to = normPhone(contact.phone)
+              await client.messages.create({
+                from: cfg.twilioWhatsapp,
+                to:   `whatsapp:${to}`,
+                body: msgBody,
+              })
+            }
+            sent++
+          // Log success to the user's messages subcollection
+          await db.collection(`users/${uid}/messages`).add({
+            to:         channel === 'email' ? contact.email : normPhone(contact.phone),
+            type:       channel,
+            body:       msgBody,
+            status:     'sent',
+            module:     'campaigns',
+            campaignId: campDoc.id,
+            sentAt:     admin.firestore.Timestamp.now(),
+          }).catch(e => console.error('[scheduler] message log failed:', e.message))
+          } catch (err) {
+            console.error(`[scheduler] send failed for contact ${contact.id}:`, err.message)
+            failed++
+            // Log failure so the Messages tab reflects the real outcome
+            await db.collection(`users/${uid}/messages`).add({
+              to:         channel === 'email' ? contact.email : normPhone(contact.phone),
+              type:       channel,
+              body:       msgBody,
+              status:     'failed',
+              module:     'campaigns',
+              campaignId: campDoc.id,
+              sentAt:     admin.firestore.Timestamp.now(),
+            }).catch(e => console.error('[scheduler] failure log failed:', e.message))
+          }
+        }
+
+        const finalStatus = failed === 0 ? 'Sent' : sent === 0 ? 'Failed' : 'Partial'
+
+        await campDoc.ref.update({
+          status:      finalStatus,
+          sentCount:   sent,
+          failedCount: failed,
+          sentAt:      admin.firestore.Timestamp.now(),
+        })
+
+        // Increment the user's messagesUsed
+        if (sent > 0) {
+          await db.doc(`users/${uid}`).update({
+            messagesUsed: admin.firestore.FieldValue.increment(sent),
+          })
+        }
+
+        console.log(`[scheduler] campaign ${campDoc.id} → ${finalStatus} (${sent} sent, ${failed} failed)`)
+      } catch (err) {
+        console.error(`[scheduler] error processing campaign ${campDoc.id}:`, err.message)
+        // Reset to Scheduled so it will retry on the next tick
+        await campDoc.ref.update({ status: 'Scheduled' }).catch(() => {})
+      }
+    }
+  }
+)
+
+// ── 6. deleteUserAccount (called from super admin) ───────────────────────────
+// Deletes both the Firestore profile doc and the Firebase Auth account so the
+// user cannot log in again. Only callable by the super admin.
+exports.deleteUserAccount = onCall(async (req) => {
+  requireSuperAdmin(req)
+  const { uid } = req.data
+  if (!uid) return { success: false, error: 'Missing uid' }
+  try {
+    await admin.auth().deleteUser(uid)
+  } catch (e) {
+    // If the Auth account is already gone, continue to clean up Firestore
+    if (e.code !== 'auth/user-not-found') {
+      console.error('deleteUserAccount auth error', e.message)
+      return { success: false, error: e.message }
+    }
+  }
+  try {
+    await db.doc(`users/${uid}`).delete()
+    return { success: true }
+  } catch (e) {
+    console.error('deleteUserAccount firestore error', e.message)
+    return { success: false, error: e.message }
+  }
+})
+
+// ── 7. sendActivationEmail (called from super admin) ─────────────────────────
 exports.sendActivationEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (req) => {
+  requireSuperAdmin(req)
   const { uid } = req.data
   if (!uid) return { success: false, error: 'Missing uid' }
   const cfg = getConfig()
@@ -198,4 +507,157 @@ exports.sendActivationEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (r
     console.error('sendActivationEmail error', e.message)
     return { success: false, error: e.message }
   }
+})
+
+// ── 8. createPayfastCheckout ──────────────────────────────────────────────────
+// Generates a PayFast Onsite payment UUID for the authenticated user's plan.
+// Returns { uuid } — client passes this to window.payfast_do_onsite_payment().
+const PLAN_PRICES = {
+  starter:    { amount: '699.00',  name: 'Tlhiso Starter Plan' },
+  business:   { amount: '2699.00', name: 'Tlhiso Professional Plan' },
+  enterprise: { amount: '4999.00', name: 'Tlhiso Business Plan' },
+}
+
+function pfSignature(fields, passphrase) {
+  const pfString = Object.entries(fields)
+    .filter(([, v]) => v !== '' && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
+    .join('&')
+  const toSign = passphrase
+    ? `${pfString}&passphrase=${encodeURIComponent(passphrase).replace(/%20/g, '+')}`
+    : pfString
+  return crypto.createHash('md5').update(toSign).digest('hex')
+}
+
+exports.createPayfastCheckout = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_MERCHANT_KEY', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+
+  const userSnap = await db.collection('users').doc(uid).get()
+  if (!userSnap.exists) throw new HttpsError('not-found', 'User profile not found.')
+
+  const user = userSnap.data()
+  const planKey = user.plan || 'starter'
+  const planData = PLAN_PRICES[planKey] || PLAN_PRICES.starter
+
+  const merchantId  = process.env.PAYFAST_MERCHANT_ID
+  const merchantKey = process.env.PAYFAST_MERCHANT_KEY
+  const passphrase  = process.env.PAYFAST_PASSPHRASE
+  const isSandbox   = merchantId === '10000100'
+  const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
+
+  const nameParts = (user.name || 'User').trim().split(/\s+/)
+  const today     = new Date().toISOString().slice(0, 10)
+
+  const fields = {
+    merchant_id:      merchantId,
+    merchant_key:     merchantKey,
+    return_url:       'https://tlhiso.com/checkout/complete',
+    cancel_url:       'https://tlhiso.com/checkout',
+    notify_url:       'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
+    name_first:       nameParts[0],
+    name_last:        nameParts.slice(1).join(' ') || 'User',
+    email_address:    user.email,
+    m_payment_id:     uid,
+    amount:           planData.amount,
+    item_name:        planData.name,
+    subscription_type: '1',
+    billing_date:     today,
+    recurring_amount: planData.amount,
+    frequency:        '3',
+    cycles:           '0',
+  }
+  fields.signature = pfSignature(fields, passphrase)
+
+  const body = Object.entries(fields)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+
+  try {
+    const resp = await axios.post(
+      `https://${host}/onsite/process`,
+      body,
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    )
+    if (!resp.data?.uuid) throw new Error(JSON.stringify(resp.data))
+    return { uuid: resp.data.uuid, sandbox: isSandbox }
+  } catch (e) {
+    console.error('createPayfastCheckout error', e.response?.data ?? e.message)
+    throw new HttpsError('internal', 'Failed to initiate payment. Please try again.')
+  }
+})
+
+// ── 9. payfastIPN ─────────────────────────────────────────────────────────────
+// Receives PayFast Instant Payment Notification (IPN).
+// Verifies the signature, then activates the user and sends a welcome email.
+exports.payfastIPN = onRequest({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_PASSPHRASE', 'SENDGRID_API_KEY'],
+}, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
+
+  const data = { ...req.body }
+  const receivedSig = data.signature
+  delete data.signature
+
+  // Verify signature
+  const passphrase = process.env.PAYFAST_PASSPHRASE
+  const expectedSig = pfSignature(data, passphrase)
+  if (receivedSig !== expectedSig) {
+    console.error('payfastIPN: signature mismatch', { received: receivedSig, expected: expectedSig })
+    res.status(400).send('Invalid signature')
+    return
+  }
+
+  const uid           = data.m_payment_id
+  const paymentStatus = data.payment_status
+  const pfPaymentId   = data.pf_payment_id
+
+  if (!uid) { res.status(400).send('Missing m_payment_id'); return }
+
+  if (paymentStatus === 'COMPLETE') {
+    try {
+      // Activate user
+      await db.collection('users').doc(uid).update({
+        isActive:         true,
+        paidAt:           admin.firestore.FieldValue.serverTimestamp(),
+        paymentStatus:    'active',
+        payfastPaymentId: pfPaymentId || null,
+      })
+
+      // Send welcome email
+      const cfg = getConfig()
+      sgMail.setApiKey(cfg.sendgridKey)
+      const userSnap = await db.collection('users').doc(uid).get()
+      const user = userSnap.data()
+      if (user?.email) {
+        await sgMail.send({
+          to: user.email,
+          from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+          subject: '🎉 Your Tlhiso subscription is active!',
+          html: `
+            <h2>Welcome to Tlhiso!</h2>
+            <p>Hi ${user.name || 'there'},</p>
+            <p>Your <strong>${PLAN_PRICES[user.plan]?.name || 'Tlhiso'}</strong> subscription is now active.
+            You can log in and start using your dashboard right away.</p>
+            <p><a href="https://tlhiso.com/login"
+              style="background:#5B8E7D;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:12px;">
+              Go to my dashboard →
+            </a></p>
+            <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? hello@tlhiso.com</p>
+          `,
+        })
+      }
+      console.log(`payfastIPN: activated uid=${uid}, pfPaymentId=${pfPaymentId}`)
+    } catch (e) {
+      console.error('payfastIPN: activation error', e.message)
+      res.status(500).send('Activation error')
+      return
+    }
+  } else {
+    console.log(`payfastIPN: status=${paymentStatus} for uid=${uid} — no action`)
+  }
+
+  res.status(200).send('OK')
 })

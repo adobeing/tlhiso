@@ -2223,13 +2223,14 @@ function Appointments() {
   const nowTop  = (nowMins - CAL_START * 60) / 60 * SLOT_H
   const showNow = nowTop >= 0 && nowTop < CAL_TOTAL_H
 
-  async function sendSmsConfirmation(patient, apptData, isEdit) {
+  async function sendSmsConfirmation(patient, apptData, isEdit, apptId) {
     if (!patient?.phone) return
     try {
-      const fn  = httpsCallable(functions, 'sendSMS')
+      const fn   = httpsCallable(functions, 'sendSMS')
+      const link = apptId ? ` Confirm, cancel or reschedule: https://tlhiso.com/appt/${uid}/${apptId}` : ''
       const msg = isEdit
-        ? `Hi ${patient.firstName}, your appointment on ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''} has been updated. Reply if you have questions.`
-        : `Hi ${patient.firstName}, your appointment has been booked for ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''}. Reply to reschedule.`
+        ? `Hi ${patient.firstName}, your appointment on ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''} has been updated.${link}`
+        : `Hi ${patient.firstName}, your appointment has been booked for ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''}.${link}`
       await fn({ to: patient.phone, message: msg })
       await addDoc(collection(db, 'users', uid, 'messages'), {
         to: patient.phone, type: 'sms', body: msg,
@@ -2249,12 +2250,14 @@ function Appointments() {
         patient: patient ? `${patient.firstName} ${patient.lastName}` : '',
         patientPhone: patient?.phone || '',
       }
+      let apptId = editing?.id
       if (editing) {
         await updateDoc(doc(db, 'users', uid, 'appointments', editing.id), payload)
       } else {
-        await addDoc(collection(db, 'users', uid, 'appointments'), { ...payload, createdAt: serverTimestamp() })
+        const docRef = await addDoc(collection(db, 'users', uid, 'appointments'), { ...payload, createdAt: serverTimestamp() })
+        apptId = docRef.id
       }
-      if (sendSms && patient) await sendSmsConfirmation(patient, payload, !!editing)
+      if (sendSms && patient) await sendSmsConfirmation(patient, payload, !!editing, apptId)
       setOpen(false); setForm(APPT_BLANK); setEditing(null); setSendSms(false)
     } finally { setSaving(false) }
   }
