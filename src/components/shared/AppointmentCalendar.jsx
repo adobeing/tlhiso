@@ -45,7 +45,9 @@ function fmtHour(h) {
   return h < 12 ? `${h} AM` : `${h - 12} PM`
 }
 
-function fmtDateStr(d) { return d.toISOString().slice(0, 10) }
+function fmtDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function getWeekStart(date) {
   const d = new Date(date)
@@ -129,7 +131,7 @@ export default function AppointmentCalendar({
   headerAction,       // ReactNode — "Book Appointment" button from parent
 }) {
   const scrollRef = useRef(null)
-  const todayStr  = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const todayStr  = useMemo(() => fmtDateStr(new Date()), [])
 
   const [calView,  setCalView]  = useState('week')
   const [mainView, setMainView] = useState('calendar')
