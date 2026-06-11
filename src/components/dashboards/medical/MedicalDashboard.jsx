@@ -8,6 +8,7 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
+import CampaignSnapshot from '../../shared/CampaignSnapshot'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
@@ -22,6 +23,8 @@ import {
 import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import CampaignsModule from '../../shared/CampaignsModule'
+import AutomationsModule from '../../shared/AutomationsModule'
+import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import SettingsPage from '../../shared/SettingsPage'
 import { fmtDate } from '../../../utils/dates'
@@ -336,14 +339,14 @@ const ICD10_CODES = [
 ]
 
 function Field({ label, error, textarea, select, children, hint, ...props }) {
-  const cls = 'w-full rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+  const cls = 'w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20'
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
       {textarea ? <textarea {...props} className={cls + ' resize-none h-24'} /> :
        select ? <select {...props} className={cls}>{children}</select> :
        <input {...props} className={cls} />}
-      {hint && <span className="mt-1 block text-[11px] text-ink-secondary/70">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-slate-600/70">{hint}</span>}
       {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
     </label>
   )
@@ -377,11 +380,11 @@ function Icd10Picker({ selected, onChange }) {
 
   return (
     <div className="col-span-2">
-      <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">Diagnosis — ICD-10 Codes</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">Diagnosis — ICD-10 Codes</span>
       {selected.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {selected.map(s => (
-            <span key={s.code} className="flex items-center gap-1 rounded-lg bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary">
+            <span key={s.code} className="flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
               {s.code} — {s.desc}
               <button type="button" onClick={() => toggle(s)} className="hover:text-red-500"><X size={12} /></button>
             </span>
@@ -389,17 +392,17 @@ function Icd10Picker({ selected, onChange }) {
         </div>
       )}
       <div className="relative">
-        <Search size={15} className="pointer-events-none absolute left-3 top-3 text-ink-secondary" />
+        <Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-600" />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search code or condition (e.g. E11, hypertension)…"
-          className="w-full rounded-xl border border-border pl-9 pr-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+          className="w-full rounded-xl border border-slate-200 pl-9 pr-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
       </div>
-      <div className="mt-2 max-h-44 overflow-y-auto rounded-xl border border-border">
-        {results.length === 0 && <p className="px-3 py-2 text-xs text-ink-secondary">No matches. Type a different term.</p>}
+      <div className="mt-2 max-h-44 overflow-y-auto rounded-xl border border-slate-200">
+        {results.length === 0 && <p className="px-3 py-2 text-xs text-slate-600">No matches. Type a different term.</p>}
         {results.map(item => (
           <button key={item.code} type="button" onClick={() => toggle(item)}
-            className={`flex w-full items-center justify-between border-b border-border px-3 py-2 text-left text-xs last:border-0 hover:bg-surface-2 ${has(item.code) ? 'bg-primary-light/50' : ''}`}>
-            <span><span className="font-bold text-ink">{item.code}</span> <span className="text-ink-secondary">{item.desc}</span></span>
-            {has(item.code) ? <X size={13} className="text-primary" /> : <Plus size={13} className="text-ink-secondary" />}
+            className={`flex w-full items-center justify-between border-b border-slate-200 px-3 py-2 text-left text-xs last:border-0 hover:bg-slate-50 ${has(item.code) ? 'bg-primary/10/50' : ''}`}>
+            <span><span className="font-bold text-slate-800">{item.code}</span> <span className="text-slate-600">{item.desc}</span></span>
+            {has(item.code) ? <X size={13} className="text-primary" /> : <Plus size={13} className="text-slate-600" />}
           </button>
         ))}
       </div>
@@ -409,7 +412,7 @@ function Icd10Picker({ selected, onChange }) {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 function Overview() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const uid = user?.uid
   const patients = useCollection(uid ? `users/${uid}/patients` : null)
   const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
@@ -462,6 +465,10 @@ function Overview() {
   return (
     <div className="space-y-6">
       <SetupChecklist industry="medical" />
+      <div>
+        <h2 className="text-lg font-bold text-slate-800">{`Welcome back${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`}</h2>
+        <p className="mt-0.5 text-sm text-slate-600">Your practice at a glance.</p>
+      </div>
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Patients" value={patients.length} icon="🫀"
@@ -471,10 +478,13 @@ function Overview() {
         <StatCard label="Pending Referrals" value={pendingReferrals.length} icon="📋" color="orange" />
       </div>
 
+      {/* Campaign snapshot */}
+      <CampaignSnapshot industry="medical" />
+
       {/* Chart + Today's schedule */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-card border border-border bg-white p-5 shadow-card">
-          <h3 className="mb-4 text-sm font-bold text-ink">Appointments — Last 7 Days</h3>
+        <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <h3 className="mb-4 text-sm font-bold text-slate-800">Appointments — Last 7 Days</h3>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={apptChartData} barSize={28}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
@@ -486,19 +496,19 @@ function Overview() {
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded-card border border-border bg-white p-5 shadow-card">
-          <h3 className="mb-3 text-sm font-bold text-ink">Today's Schedule</h3>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Today's Schedule</h3>
           {todayAppts.length === 0
-            ? <p className="text-sm text-ink-secondary">No appointments today.</p>
+            ? <p className="text-sm text-slate-600">No appointments today.</p>
             : <div className="space-y-2">
                 {[...todayAppts].sort((a, b) => (a.time || '').localeCompare(b.time || '')).map(a => (
-                  <div key={a.id} className="flex items-start gap-3 rounded-xl bg-surface-2 p-3">
-                    <div className="flex h-8 w-14 shrink-0 items-center justify-center rounded-lg bg-primary-light text-xs font-bold text-primary">
+                  <div key={a.id} className="flex items-start gap-3 rounded-xl bg-slate-50 p-3">
+                    <div className="flex h-8 w-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
                       {a.time || '—'}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{a.patient}</p>
-                      <p className="truncate text-xs text-ink-secondary">{a.reason || '—'}</p>
+                      <p className="truncate text-sm font-semibold text-slate-800">{a.patient}</p>
+                      <p className="truncate text-xs text-slate-600">{a.reason || '—'}</p>
                     </div>
                   </div>
                 ))}
@@ -509,35 +519,35 @@ function Overview() {
 
       {/* Recent consultations + Upcoming appointments */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-card border border-border bg-white p-5 shadow-card">
-          <h3 className="mb-3 text-sm font-bold text-ink">Recent Consultations</h3>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Recent Consultations</h3>
           {recentConsults.length === 0
-            ? <p className="text-sm text-ink-secondary">No consultations recorded yet.</p>
+            ? <p className="text-sm text-slate-600">No consultations recorded yet.</p>
             : recentConsults.map(c => (
-                <div key={c.id} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
+                <div key={c.id} className="flex items-center justify-between border-b border-slate-200 py-2.5 last:border-0">
                   <div className="min-w-0 pr-4">
-                    <p className="truncate text-sm font-semibold text-ink">{c.patient}</p>
-                    <p className="truncate text-xs text-ink-secondary">{c.chiefComplaint || '—'}</p>
+                    <p className="truncate text-sm font-semibold text-slate-800">{c.patient}</p>
+                    <p className="truncate text-xs text-slate-600">{c.chiefComplaint || '—'}</p>
                   </div>
-                  <span className="shrink-0 text-xs text-ink-secondary">{c.date || '—'}</span>
+                  <span className="shrink-0 text-xs text-slate-600">{c.date || '—'}</span>
                 </div>
               ))
           }
         </div>
 
-        <div className="rounded-card border border-border bg-white p-5 shadow-card">
-          <h3 className="mb-3 text-sm font-bold text-ink">Upcoming Appointments</h3>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Upcoming Appointments</h3>
           {upcoming.length === 0
-            ? <p className="text-sm text-ink-secondary">No appointments in the next 7 days.</p>
+            ? <p className="text-sm text-slate-600">No appointments in the next 7 days.</p>
             : upcoming.map(a => (
-                <div key={a.id} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
+                <div key={a.id} className="flex items-center justify-between border-b border-slate-200 py-2.5 last:border-0">
                   <div className="min-w-0 pr-4">
-                    <p className="truncate text-sm font-semibold text-ink">{a.patient}</p>
-                    <p className="truncate text-xs text-ink-secondary">{a.reason || '—'}</p>
+                    <p className="truncate text-sm font-semibold text-slate-800">{a.patient}</p>
+                    <p className="truncate text-xs text-slate-600">{a.reason || '—'}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-xs font-semibold text-primary">{a.date}</p>
-                    {a.time && <p className="text-xs text-ink-secondary">{a.time}</p>}
+                    <p className="text-xs font-semibold text-primary">{fmtDate(a.date)}</p>
+                    {a.time && <p className="text-xs text-slate-600">{a.time}</p>}
                   </div>
                 </div>
               ))
@@ -685,9 +695,9 @@ function Patients() {
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1">
         <button onClick={e => { e.stopPropagation(); setViewing(r) }}
-          title="View" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
+          title="View" className="rounded p-1 text-slate-600 hover:bg-slate-50"><Eye size={14} /></button>
         <button onClick={e => { e.stopPropagation(); openEdit(r) }}
-          title="Edit" className="rounded p-1 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
+          title="Edit" className="rounded p-1 text-primary hover:bg-primary/10"><Pencil size={14} /></button>
         <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this patient? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'patients', r.id)) }}
           title="Delete" className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
       </div>
@@ -696,7 +706,7 @@ function Patients() {
 
   const AddBtn = ({ onClick, children }) => (
     <button type="button" onClick={onClick}
-      className="col-span-2 flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light">
+      className="col-span-2 flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10">
       <Plus size={13} /> {children}
     </button>
   )
@@ -704,10 +714,10 @@ function Patients() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Patients</h2>
+        <h2 className="text-base font-bold text-slate-800">Patients</h2>
         <div className="flex items-center gap-2">
           <button onClick={() => setShareOpen(true)}
-            className="flex items-center gap-2 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 transition">
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition">
             <Link2 size={15} /> Share Intake Form
           </button>
           <button onClick={() => { resetAll(); setOpen(true) }} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
@@ -720,32 +730,32 @@ function Patients() {
       {/* Share intake form modal */}
       <Modal open={shareOpen} onClose={() => { setShareOpen(false); setShareEmail(''); setShareSent(false) }} title="Share Patient Intake Form">
         <div className="space-y-4">
-          <p className="text-sm text-ink-secondary">
+          <p className="text-sm text-slate-600">
             Send patients this link to fill in their details before their appointment. Submissions appear instantly in your Patients list.
           </p>
 
           {/* Link display + copy */}
           <div>
-            <p className="mb-1.5 text-xs font-semibold text-ink-secondary">Form link</p>
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2.5">
-              <span className="flex-1 truncate font-mono text-xs text-ink">{intakeLink}</span>
+            <p className="mb-1.5 text-xs font-semibold text-slate-600">Form link</p>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <span className="flex-1 truncate font-mono text-xs text-slate-800">{intakeLink}</span>
               <button onClick={copyLink}
-                className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition">
                 {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
               </button>
             </div>
           </div>
 
           {/* Email the link */}
-          <div className="border-t border-border pt-4">
-            <p className="mb-2 text-xs font-semibold text-ink-secondary">Email link to patient</p>
+          <div className="border-t border-slate-200 pt-4">
+            <p className="mb-2 text-xs font-semibold text-slate-600">Email link to patient</p>
             <div className="flex gap-2">
               <input
                 type="email"
                 value={shareEmail}
                 onChange={e => setShareEmail(e.target.value)}
                 placeholder="patient@email.com"
-                className="flex-1 rounded-xl border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
               <button onClick={emailIntakeLink} disabled={shareBusy || !shareEmail}
                 className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d] disabled:opacity-50 transition">
@@ -805,14 +815,14 @@ function Patients() {
             <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
           </ReferralFormSection>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Dependants</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Users size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Dependants</h4>
             </div>
             <div className="space-y-2 p-4">
               {dependants.map((d, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
                   <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
@@ -824,14 +834,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic Conditions (ICD-10)</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Activity size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Chronic Conditions (ICD-10)</h4>
             </div>
             <div className="space-y-2 p-4">
               {conditions.map((c, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
                   <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
                   <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
@@ -841,14 +851,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic & Current Medication</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Chronic & Current Medication</h4>
             </div>
             <div className="space-y-2 p-4">
               {medications.map((m, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
@@ -859,14 +869,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><AlertTriangle size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Allergies</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><AlertTriangle size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Allergies</h4>
             </div>
             <div className="space-y-2 p-4">
               {allergies.map((a, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
                   <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
@@ -879,14 +889,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Surgical History</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Surgical History</h4>
             </div>
             <div className="space-y-2 p-4">
               {surgeries.map((s, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
@@ -951,14 +961,14 @@ function Patients() {
             <Field label="Dependant Code" value={form.dependantCode} onChange={set('dependantCode')} />
           </ReferralFormSection>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Dependants</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Users size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Dependants</h4>
             </div>
             <div className="space-y-2 p-4">
               {dependants.map((d, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-4"><Field label="Name" value={d.name} onChange={e => updateRow(dependants,setDependants)(i,'name',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="DOB" type="date" value={d.dob} onChange={e => updateRow(dependants,setDependants)(i,'dob',e.target.value)} /></div>
                   <div className="col-span-2"><Field label="Relationship" value={d.relationship} onChange={e => updateRow(dependants,setDependants)(i,'relationship',e.target.value)} /></div>
@@ -970,14 +980,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic Conditions (ICD-10)</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Activity size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Chronic Conditions (ICD-10)</h4>
             </div>
             <div className="space-y-2 p-4">
               {conditions.map((c, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-7"><Field label="Condition" value={c.condition} onChange={e => updateRow(conditions,setConditions)(i,'condition',e.target.value)} /></div>
                   <div className="col-span-4"><Field label="ICD-10 Code" placeholder="e.g. E11.9" value={c.icd10} onChange={e => updateRow(conditions,setConditions)(i,'icd10',e.target.value)} /></div>
                   <button type="button" onClick={() => removeRow(conditions,setConditions)(i)} className="col-span-1 mb-1 rounded p-2 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
@@ -987,14 +997,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Chronic & Current Medication</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Chronic & Current Medication</h4>
             </div>
             <div className="space-y-2 p-4">
               {medications.map((m, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-5"><Field label="Medication" value={m.name} onChange={e => updateRow(medications,setMedications)(i,'name',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Dosage" placeholder="e.g. 500mg" value={m.dosage} onChange={e => updateRow(medications,setMedications)(i,'dosage',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Frequency" placeholder="e.g. twice daily" value={m.frequency} onChange={e => updateRow(medications,setMedications)(i,'frequency',e.target.value)} /></div>
@@ -1005,14 +1015,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><AlertTriangle size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Allergies</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><AlertTriangle size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Allergies</h4>
             </div>
             <div className="space-y-2 p-4">
               {allergies.map((a, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-4"><Field label="Allergen" value={a.allergen} onChange={e => updateRow(allergies,setAllergies)(i,'allergen',e.target.value)} /></div>
                   <div className="col-span-4"><Field label="Reaction" value={a.reaction} onChange={e => updateRow(allergies,setAllergies)(i,'reaction',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Severity" select value={a.severity} onChange={e => updateRow(allergies,setAllergies)(i,'severity',e.target.value)}>
@@ -1025,14 +1035,14 @@ function Patients() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Surgical History</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Surgical History</h4>
             </div>
             <div className="space-y-2 p-4">
               {surgeries.map((s, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-5"><Field label="Procedure" value={s.procedure} onChange={e => updateRow(surgeries,setSurgeries)(i,'procedure',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Date" type="date" value={s.date} onChange={e => updateRow(surgeries,setSurgeries)(i,'date',e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Notes" value={s.notes} onChange={e => updateRow(surgeries,setSurgeries)(i,'notes',e.target.value)} /></div>
@@ -1056,15 +1066,15 @@ function Patients() {
       <Modal open={!!viewing} onClose={() => setViewing(null)} title="Patient Record" size="xl">
         {viewing && (
           <div className="text-sm">
-            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+            <div className="-mx-6 -mt-2 mb-4 border-b border-slate-200 bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
                     {initials(`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim())}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold leading-tight text-ink">{`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim() || '—'}</h3>
-                    <p className="text-xs text-ink-secondary">{[viewing.gender, viewing.dob && `DOB ${fmtDate(viewing.dob)}`].filter(Boolean).join(' · ') || 'Patient'}</p>
+                    <h3 className="text-base font-bold leading-tight text-slate-800">{`${viewing.firstName || ''} ${viewing.lastName || ''}`.trim() || '—'}</h3>
+                    <p className="text-xs text-slate-600">{[viewing.gender, viewing.dob && `DOB ${fmtDate(viewing.dob)}`].filter(Boolean).join(' · ') || 'Patient'}</p>
                   </div>
                 </div>
                 {viewing.bloodType && <StatusPill label={`Blood ${viewing.bloodType}`} tone="red" />}
@@ -1072,26 +1082,26 @@ function Patients() {
               <div className="mt-3 flex flex-wrap gap-5 text-xs">
                 {viewing.idNumber && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.idNumber}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.idNumber}</p>
                   </div>
                 )}
                 {viewing.phone && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Phone</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.phone}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Phone</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.phone}</p>
                   </div>
                 )}
                 {viewing.email && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Email</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.email}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Email</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.email}</p>
                   </div>
                 )}
                 {viewing.medicalAid && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Medical Aid</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.medicalAid}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Medical Aid</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.medicalAid}</p>
                   </div>
                 )}
               </div>
@@ -1102,64 +1112,64 @@ function Patients() {
                 <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wider text-red-500">Allergies</p>
-                  <p className="text-sm text-ink">{viewing.allergies.map(a => `${a.allergen}${a.severity ? ` (${a.severity})` : ''}`).join(', ')}</p>
+                  <p className="text-sm text-slate-800">{viewing.allergies.map(a => `${a.allergen}${a.severity ? ` (${a.severity})` : ''}`).join(', ')}</p>
                 </div>
               </div>
             )}
 
             <div className="space-y-4">
-              <div className="overflow-hidden rounded-xl border border-border">
-                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><User size={13} /></span>
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Personal & Contact</h4>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><User size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Personal & Contact</h4>
                 </div>
                 <div className="grid grid-cols-2 divide-x divide-border/70">
                   <ReferralField label="Home Language" value={viewing.homeLanguage} />
                   <ReferralField label="Marital Status" value={viewing.maritalStatus} />
                 </div>
-                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-slate-200/70">
                   <ReferralField label="Race" value={viewing.race} />
                   <ReferralField label="Phone" value={viewing.phone} />
                 </div>
                 {viewing.address && (
-                  <div className="border-t border-border/70">
+                  <div className="border-t border-slate-200/70">
                     <ReferralField label="Physical Address" value={viewing.address} full />
                   </div>
                 )}
               </div>
 
               {(viewing.nextOfKinName || viewing.nextOfKinPhone) && (
-                <div className="overflow-hidden rounded-xl border border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Users size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Next of Kin</h4>
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Users size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Next of Kin</h4>
                   </div>
                   <div className="grid grid-cols-2 divide-x divide-border/70">
                     <ReferralField label="Name" value={viewing.nextOfKinName} />
                     <ReferralField label="Relationship" value={viewing.nextOfKinRelationship} />
                   </div>
-                  <div className="border-t border-border/70">
+                  <div className="border-t border-slate-200/70">
                     <ReferralField label="Phone" value={viewing.nextOfKinPhone} full />
                   </div>
                 </div>
               )}
 
               {(viewing.medicalAid || viewing.memberNumber) && (
-                <div className="overflow-hidden rounded-xl border border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><CreditCard size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Medical Aid</h4>
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><CreditCard size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Medical Aid</h4>
                   </div>
                   <div className="grid grid-cols-2 divide-x divide-border/70">
                     <ReferralField label="Scheme" value={viewing.medicalAid} />
                     <ReferralField label="Plan / Option" value={viewing.planName} />
                   </div>
-                  <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                  <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-slate-200/70">
                     <ReferralField label="Member Number" value={viewing.memberNumber} />
                     <ReferralField label="Principal Member" value={viewing.principalMember} />
                   </div>
                   {viewing.dependantCode && (
-                    <div className="border-t border-border/70">
+                    <div className="border-t border-slate-200/70">
                       <ReferralField label="Dependant Code" value={viewing.dependantCode} full />
                     </div>
                   )}
@@ -1170,9 +1180,9 @@ function Patients() {
                 <RecordViewSection title="Dependants" icon={Users}>
                   <div className="space-y-1.5">
                     {viewing.dependants.map((d, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2">
-                        <span className="text-sm font-medium text-ink">{d.name}</span>
-                        <span className="text-xs text-ink-secondary">{[d.relationship, d.dob, d.dependantCode].filter(Boolean).join(' · ')}</span>
+                      <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                        <span className="text-sm font-medium text-slate-800">{d.name}</span>
+                        <span className="text-xs text-slate-600">{[d.relationship, d.dob, d.dependantCode].filter(Boolean).join(' · ')}</span>
                       </div>
                     ))}
                   </div>
@@ -1189,9 +1199,9 @@ function Patients() {
                 <RecordViewSection title="Current Medication" icon={Pill}>
                   <div className="space-y-1.5">
                     {viewing.currentMedication.map((m, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
+                      <div key={i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
                         <Pill size={13} className="shrink-0 text-primary" />
-                        <span className="text-sm text-ink"><span className="font-semibold">{m.name}</span> {m.dosage} · {m.frequency}</span>
+                        <span className="text-sm text-slate-800"><span className="font-semibold">{m.name}</span> {m.dosage} · {m.frequency}</span>
                       </div>
                     ))}
                   </div>
@@ -1202,9 +1212,9 @@ function Patients() {
                 <RecordViewSection title="Surgical History" icon={ClipboardList}>
                   <div className="space-y-1.5">
                     {viewing.surgicalHistory.map((s, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-2">
-                        <span className="text-sm font-medium text-ink">{s.procedure}</span>
-                        <span className="text-xs text-ink-secondary">{[s.date, s.notes].filter(Boolean).join(' · ')}</span>
+                      <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                        <span className="text-sm font-medium text-slate-800">{s.procedure}</span>
+                        <span className="text-xs text-slate-600">{[s.date, s.notes].filter(Boolean).join(' · ')}</span>
                       </div>
                     ))}
                   </div>
@@ -1213,7 +1223,7 @@ function Patients() {
 
               {viewing.notes && (
                 <RecordViewSection title="Clinical Notes" icon={FileText}>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{viewing.notes}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{viewing.notes}</p>
                 </RecordViewSection>
               )}
             </div>
@@ -1463,7 +1473,7 @@ function Consultations() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Consultations</h2>
+        <h2 className="text-base font-bold text-slate-800">Consultations</h2>
         <button onClick={() => { resetAll(); setOpen(true) }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
           <PlusCircle size={15} /> New Consultation
@@ -1500,15 +1510,15 @@ function Consultations() {
             <Field label="BMI (auto)" value={form.bmi} readOnly hint="Calculated from weight & height" />
           </ReferralFormSection>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Mic size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Voice Note & Transcription</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Mic size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Voice Note & Transcription</h4>
             </div>
             <div className="p-4">
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" onClick={recording ? stopRecording : startRecording}
-                  className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${recording ? 'bg-red-500 text-white animate-pulse' : 'border border-border text-ink-secondary hover:border-primary'}`}>
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${recording ? 'bg-red-500 text-white animate-pulse' : 'border border-slate-200 text-slate-600 hover:border-primary'}`}>
                   {recording ? <><Square size={14} /> Stop</> : <><Mic size={14} /> Record</>}
                 </button>
                 {recording && (
@@ -1516,12 +1526,12 @@ function Consultations() {
                     ● Recording… {String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}
                   </span>
                 )}
-                {uploadingAudio && <span className="flex items-center gap-1 text-xs text-ink-secondary"><Loader2 size={13} className="animate-spin" /> Saving audio…</span>}
+                {uploadingAudio && <span className="flex items-center gap-1 text-xs text-slate-600"><Loader2 size={13} className="animate-spin" /> Saving audio…</span>}
                 {audioUrl && !recording && (
                   <>
                     <audio ref={audioElRef} src={audioUrl} onEnded={() => setPlaying(false)} className="hidden" />
                     <button type="button" onClick={togglePlay}
-                      className="flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-ink-secondary hover:border-primary">
+                      className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-primary">
                       {playing ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
                     </button>
                     <button type="button" onClick={runTranscription} disabled={transcribing || uploadingAudio}
@@ -1533,13 +1543,13 @@ function Consultations() {
               </div>
               {recError && <p className="mt-2 text-xs font-medium text-red-500">{recError}</p>}
               {audioUrl && !recording && !recError && (
-                <p className="mt-2 text-[11px] text-ink-secondary">Tip: play back to check the audio before transcribing or saving.</p>
+                <p className="mt-2 text-[11px] text-slate-600">Tip: play back to check the audio before transcribing or saving.</p>
               )}
               {transcript && (
                 <div className="mt-3">
-                  <span className="mb-1 block text-xs font-semibold text-ink-secondary">Transcript (editable)</span>
+                  <span className="mb-1 block text-xs font-semibold text-slate-600">Transcript (editable)</span>
                   <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
-                    className="h-28 w-full resize-none rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                    className="h-28 w-full resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
                 </div>
               )}
             </div>
@@ -1552,22 +1562,22 @@ function Consultations() {
             <div className="col-span-2"><Field label="Plan — management, investigations, advice" textarea value={form.plan} onChange={set('plan')} /></div>
           </ReferralFormSection>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Diagnosis (ICD-10)</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Diagnosis (ICD-10)</h4>
             </div>
             <div className="p-4"><Icd10Picker selected={icd} onChange={setIcd} /></div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Pill size={13} /></span>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Prescription</h4>
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Pill size={13} /></span>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Prescription</h4>
             </div>
             <div className="space-y-2 p-4">
               {rx.map((r, i) => (
-                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-surface-2 p-3">
+                <div key={i} className="grid grid-cols-12 items-end gap-2 rounded-xl bg-slate-50 p-3">
                   <div className="col-span-4"><Field label="Medication" value={r.drug} onChange={e => updateRx(i, 'drug', e.target.value)} /></div>
                   <div className="col-span-3"><Field label="Dosage" value={r.dosage} onChange={e => updateRx(i, 'dosage', e.target.value)} placeholder="e.g. 500mg" /></div>
                   <div className="col-span-2"><Field label="Frequency" value={r.frequency} onChange={e => updateRx(i, 'frequency', e.target.value)} placeholder="bd" /></div>
@@ -1576,7 +1586,7 @@ function Consultations() {
                 </div>
               ))}
               <button type="button" onClick={() => setRx([...rx, emptyRx()])}
-                className="flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light">
+                className="flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10">
                 <Plus size={13} /> Add Medication
               </button>
             </div>
@@ -1598,34 +1608,34 @@ function Consultations() {
       <Modal open={!!viewing} onClose={() => { setViewing(null); setEditing(false) }} title={editing ? 'Edit Consultation' : 'Consultation Record'} size="xl">
         {viewing && !editing && (
           <div className="text-sm">
-            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+            <div className="-mx-6 -mt-2 mb-4 border-b border-slate-200 bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
                     {initials(viewing.patient)}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
-                    <p className="text-xs text-ink-secondary">Consultation Record</p>
+                    <h3 className="text-base font-bold leading-tight text-slate-800">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-slate-600">Consultation Record</p>
                   </div>
                 </div>
                 {viewing.followUpDate && <StatusPill label="Follow-up set" tone="primary" />}
               </div>
               <div className="mt-3 flex flex-wrap gap-5 text-xs">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
-                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-slate-800">{fmtDate(viewing.date)}</p>
                 </div>
                 {viewing.practitioner && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Practitioner</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.practitioner}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.practitioner}</p>
                   </div>
                 )}
                 {viewing.chiefComplaint && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Chief Complaint</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.chiefComplaint}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Chief Complaint</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.chiefComplaint}</p>
                   </div>
                 )}
               </div>
@@ -1655,10 +1665,10 @@ function Consultations() {
               )}
 
               {(viewing.subjective || viewing.objective || viewing.assessment || viewing.plan) && (
-                <div className="overflow-hidden rounded-xl border border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">SOAP Notes</h4>
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><FileText size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">SOAP Notes</h4>
                   </div>
                   <div className="divide-y divide-border/70">
                     {viewing.subjective && <ReferralField label="Subjective" value={viewing.subjective} full />}
@@ -1679,9 +1689,9 @@ function Consultations() {
                 <RecordViewSection title="Prescription" icon={Pill}>
                   <div className="space-y-1.5">
                     {viewing.prescription.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
+                      <div key={i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
                         <Pill size={13} className="shrink-0 text-primary" />
-                        <span className="text-sm text-ink"><span className="font-semibold">{r.drug}</span> {r.dosage} · {r.frequency} · {r.duration}</span>
+                        <span className="text-sm text-slate-800"><span className="font-semibold">{r.drug}</span> {r.dosage} · {r.frequency} · {r.duration}</span>
                       </div>
                     ))}
                   </div>
@@ -1690,15 +1700,15 @@ function Consultations() {
 
               {viewing.transcript && (
                 <RecordViewSection title="Voice Transcript" icon={Mic}>
-                  <p className="whitespace-pre-wrap rounded-xl bg-surface-2 p-3 text-sm leading-relaxed text-ink-secondary">{viewing.transcript}</p>
+                  <p className="whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-600">{viewing.transcript}</p>
                 </RecordViewSection>
               )}
 
               {viewing.followUpDate && (
-                <div className="overflow-hidden rounded-xl border border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Calendar size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Follow-up</h4>
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Calendar size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Follow-up</h4>
                   </div>
                   <div className="grid grid-cols-2 divide-x divide-border/70">
                     <ReferralField label="Date" value={fmtDate(viewing.followUpDate)} />
@@ -1734,10 +1744,10 @@ function Consultations() {
               <div className="col-span-2"><Field label="Plan" textarea value={editForm.plan} onChange={setE('plan')} /></div>
             </ReferralFormSection>
 
-            <div className="overflow-hidden rounded-xl border border-border">
-              <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Diagnosis (ICD-10)</h4>
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Diagnosis (ICD-10)</h4>
               </div>
               <div className="p-4"><Icd10Picker selected={editForm.icd10 || []} onChange={v => setEditForm(f => ({ ...f, icd10: v }))} /></div>
             </div>
@@ -1757,7 +1767,7 @@ function Consultations() {
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
               </button>
               <button onClick={() => setEditing(false)}
-                className="rounded-xl border border-border px-5 py-2.5 text-sm font-semibold text-ink-secondary hover:border-primary">
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:border-primary">
                 Cancel
               </button>
             </div>
@@ -1778,15 +1788,15 @@ function initials(name = '') {
 // Header band: avatar + identity + meta chips + optional status pill
 function RecordHeader({ name, subtitle, meta = [], status, statusTone }) {
   return (
-    <div className="-mx-6 -mt-2 mb-5 border-b border-border bg-gradient-to-r from-primary-light/70 to-surface-2 px-6 py-4">
+    <div className="-mx-6 -mt-2 mb-5 border-b border-slate-200 bg-gradient-to-r from-primary-light/70 to-surface-2 px-6 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-base font-bold text-white shadow-sm">
             {initials(name)}
           </div>
           <div>
-            <h3 className="text-lg font-bold leading-tight text-ink">{name || '—'}</h3>
-            {subtitle && <p className="text-xs font-medium text-ink-secondary">{subtitle}</p>}
+            <h3 className="text-lg font-bold leading-tight text-slate-800">{name || '—'}</h3>
+            {subtitle && <p className="text-xs font-medium text-slate-600">{subtitle}</p>}
           </div>
         </div>
         {status && <StatusPill label={status} tone={statusTone} />}
@@ -1796,10 +1806,10 @@ function RecordHeader({ name, subtitle, meta = [], status, statusTone }) {
           {meta.filter(m => m.value).map((m, i) => {
             const Icon = m.icon
             return (
-              <span key={i} className="flex items-center gap-1.5 text-xs text-ink-secondary">
+              <span key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
                 {Icon && <Icon size={13} className="text-primary" />}
-                <span className="font-medium text-ink">{m.value}</span>
-                {m.label && <span className="text-ink-secondary/70">· {m.label}</span>}
+                <span className="font-medium text-slate-800">{m.value}</span>
+                {m.label && <span className="text-slate-600/70">· {m.label}</span>}
               </span>
             )
           })}
@@ -1819,7 +1829,7 @@ function ToolbarBtn({ onClick, disabled, primary, icon: Icon, loading, children 
     <button onClick={onClick} disabled={disabled}
       className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition disabled:opacity-60 ${
         primary ? 'bg-primary text-white hover:bg-[#4e7d6d]'
-                : 'border border-border text-ink-secondary hover:border-primary hover:text-ink'}`}>
+                : 'border border-slate-200 text-slate-600 hover:border-primary hover:text-slate-800'}`}>
       {loading ? <Loader2 size={14} className="animate-spin" /> : Icon && <Icon size={14} />}
       {children}
     </button>
@@ -1829,11 +1839,11 @@ function ToolbarBtn({ onClick, disabled, primary, icon: Icon, loading, children 
 // Titled section card with an icon
 function Card({ icon: Icon, title, children, className = '' }) {
   return (
-    <div className={`rounded-2xl border border-border bg-white p-4 shadow-card ${className}`}>
+    <div className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-card ${className}`}>
       {title && (
         <div className="mb-3 flex items-center gap-2">
-          {Icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-light text-primary"><Icon size={15} /></span>}
-          <h4 className="text-xs font-bold uppercase tracking-wider text-ink">{title}</h4>
+          {Icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><Icon size={15} /></span>}
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">{title}</h4>
         </div>
       )}
       {children}
@@ -1846,16 +1856,16 @@ function Detail({ label, value, block }) {
   if (value === undefined || value === null || value === '') return null
   if (block) {
     return (
-      <div className="border-t border-border/60 py-2 first:border-0 first:pt-0">
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">{label}</p>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{value}</p>
+      <div className="border-t border-slate-200/60 py-2 first:border-0 first:pt-0">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{label}</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{value}</p>
       </div>
     )
   }
   return (
-    <div className="flex items-baseline justify-between gap-3 border-t border-border/60 py-2 first:border-0 first:pt-0">
-      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-ink-secondary">{label}</span>
-      <span className="text-right text-sm font-medium text-ink">{value}</span>
+    <div className="flex items-baseline justify-between gap-3 border-t border-slate-200/60 py-2 first:border-0 first:pt-0">
+      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-600">{label}</span>
+      <span className="text-right text-sm font-medium text-slate-800">{value}</span>
     </div>
   )
 }
@@ -1874,11 +1884,11 @@ function VitalsGrid({ vitals }) {
       {items.map((v, i) => {
         const Icon = v.icon
         return (
-          <div key={i} className="rounded-xl border border-border bg-surface-2 px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
+          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
               {Icon && <Icon size={12} className="text-primary" />} {v.label}
             </div>
-            <p className="mt-0.5 text-sm font-bold text-ink">{v.value}{v.unit ? <span className="ml-0.5 text-xs font-medium text-ink-secondary">{v.unit}</span> : null}</p>
+            <p className="mt-0.5 text-sm font-bold text-slate-800">{v.value}{v.unit ? <span className="ml-0.5 text-xs font-medium text-slate-600">{v.unit}</span> : null}</p>
           </div>
         )
       })}
@@ -1892,8 +1902,8 @@ const PILL_TONES = {
   purple: 'bg-purple-50 text-purple-600 ring-purple-600/20',
   orange: 'bg-orange-50 text-orange-600 ring-orange-600/20',
   red: 'bg-red-50 text-red-500 ring-red-500/20',
-  primary: 'bg-primary-light text-primary ring-primary/20',
-  slate: 'bg-surface-2 text-ink-secondary ring-border',
+  primary: 'bg-primary/10 text-primary ring-primary/20',
+  slate: 'bg-slate-50 text-slate-600 ring-border',
 }
 function StatusPill({ label, tone = 'slate' }) {
   if (!label) return null
@@ -1910,7 +1920,7 @@ function Chips({ items }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((c, i) => (
-        <span key={i} className="rounded-lg bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary ring-1 ring-inset ring-primary/15">{c}</span>
+        <span key={i} className="rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary ring-1 ring-inset ring-primary/15">{c}</span>
       ))}
     </div>
   )
@@ -1969,7 +1979,7 @@ function Practitioners() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Practitioners</h2>
+        <h2 className="text-base font-bold text-slate-800">Practitioners</h2>
         <button onClick={() => { setForm(PRAC_BLANK); setOpen(true) }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
           <PlusCircle size={15} /> Add Practitioner
@@ -2037,7 +2047,7 @@ const BADGE_COLORS = {
   Scheduled:  'bg-blue-50 text-blue-700',
   Confirmed:  'bg-green-50 text-green-700',
   Arrived:    'bg-purple-50 text-purple-700',
-  Completed:  'bg-primary-light text-primary',
+  Completed:  'bg-primary/10 text-primary',
   Cancelled:  'bg-red-50 text-red-600',
   'No-show':  'bg-orange-50 text-orange-600',
 }
@@ -2062,7 +2072,9 @@ function getWeekDays(ws) {
   })
 }
 
-function fmtDateStr(d) { return d.toISOString().slice(0, 10) }
+function fmtDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function fmtHour(h) {
   if (h === 12) return '12 PM'
@@ -2122,7 +2134,7 @@ function CalApptBlock({ appt, layout, onClick }) {
 }
 
 function Appointments() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const uid = user?.uid
   const appointments  = useCollection(uid ? `users/${uid}/appointments` : null)
   const patients      = useCollection(uid ? `users/${uid}/patients` : null)
@@ -2149,6 +2161,28 @@ function Appointments() {
         status: 'Confirmed', confirmationStatus: 'confirmed',
         rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
       })
+      if (appt.patientPhone) {
+        try {
+          const fn  = httpsCallable(functions, 'sendSMS')
+          const msg = `Hi ${appt.patient}, your reschedule request has been accepted. Your new appointment is confirmed for ${fmtDate(appt.rescheduleDate)} at ${appt.rescheduleTime}.`
+          await fn({ to: appt.patientPhone, message: msg })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.patientPhone, type: 'sms', body: msg,
+            module: 'reschedule-accepted', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      } else if (appt.patientEmail) {
+        try {
+          const fn      = httpsCallable(functions, 'sendEmail')
+          const subject = 'Appointment Reschedule Confirmed'
+          const htmlBody = `<p>Hi ${appt.patient}, your reschedule request has been accepted. Your new appointment is confirmed for ${fmtDate(appt.rescheduleDate)} at ${appt.rescheduleTime}.</p>`
+          await fn({ to: appt.patientEmail, subject, htmlBody })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.patientEmail, type: 'email', body: subject,
+            module: 'reschedule-accepted', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      }
     } finally { setRescheduleBusy(null) }
   }
 
@@ -2159,12 +2193,34 @@ function Appointments() {
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), {
         confirmationStatus: null, rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
       })
+      if (appt.patientPhone) {
+        try {
+          const fn  = httpsCallable(functions, 'sendSMS')
+          const msg = `Hi ${appt.patient}, your reschedule request could not be accommodated. Your original appointment remains on ${fmtDate(appt.date)} at ${appt.time}.`
+          await fn({ to: appt.patientPhone, message: msg })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.patientPhone, type: 'sms', body: msg,
+            module: 'reschedule-declined', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      } else if (appt.patientEmail) {
+        try {
+          const fn      = httpsCallable(functions, 'sendEmail')
+          const subject = 'Appointment Reschedule Request Update'
+          const htmlBody = `<p>Hi ${appt.patient}, your reschedule request could not be accommodated. Your original appointment remains on ${fmtDate(appt.date)} at ${appt.time}.</p>`
+          await fn({ to: appt.patientEmail, subject, htmlBody })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.patientEmail, type: 'email', body: subject,
+            module: 'reschedule-declined', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      }
     } finally { setRescheduleBusy(null) }
   }
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
   // Calendar state
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const todayStr = useMemo(() => fmtDateStr(new Date()), [])
   const [calView,  setCalView]  = useState('week')
   const [mainView, setMainView] = useState('calendar')
   const [anchor,   setAnchor]   = useState(() => getWeekStart(new Date()))
@@ -2224,12 +2280,13 @@ function Appointments() {
     else { setAnchor(getWeekStart(new Date())) }
   }
 
+  const TZ_JB = { timeZone: 'Africa/Johannesburg' }
   const rangeLabel = useMemo(() => {
-    if (calView === 'day') return anchor.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    if (calView === 'day') return anchor.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', ...TZ_JB })
     const ws = days[0]; const we = days[6]
     return ws.getMonth() === we.getMonth()
-      ? `${ws.getDate()}–${we.getDate()} ${ws.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`
-      : `${ws.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })} – ${we.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}`
+      ? `${ws.getDate()}–${we.getDate()} ${ws.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', ...TZ_JB })}`
+      : `${ws.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', ...TZ_JB })} – ${we.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', ...TZ_JB })}`
   }, [calView, anchor, days])
 
   const apptsByDate = useMemo(() => {
@@ -2252,8 +2309,8 @@ function Appointments() {
       const fn   = httpsCallable(functions, 'sendSMS')
       const link = apptId ? ` Confirm, cancel or reschedule: https://tlhiso.com/appt/${uid}/${apptId}` : ''
       const msg = isEdit
-        ? `Hi ${patient.firstName}, your appointment on ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''} has been updated.${link}`
-        : `Hi ${patient.firstName}, your appointment has been booked for ${apptData.date} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''}.${link}`
+        ? `Hi ${patient.firstName}, your appointment on ${fmtDate(apptData.date)} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''} has been updated.${link}`
+        : `Hi ${patient.firstName}, your appointment has been booked for ${fmtDate(apptData.date)} at ${apptData.time}${apptData.practitioner ? ` with ${apptData.practitioner}` : ''}.${link}`
       await fn({ to: patient.phone, message: msg })
       await addDoc(collection(db, 'users', uid, 'messages'), {
         to: patient.phone, type: 'sms', body: msg,
@@ -2272,6 +2329,9 @@ function Appointments() {
         ...form,
         patient: patient ? `${patient.firstName} ${patient.lastName}` : '',
         patientPhone: patient?.phone || '',
+        patientEmail: patient?.email || '',
+        ownerPhone: profile?.phone || '',
+        ownerEmail: user?.email || '',
       }
       let apptId = editing?.id
       if (editing) {
@@ -2288,6 +2348,37 @@ function Appointments() {
   async function setApptStatus(appt, status) {
     await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { status })
     if (detailAppt?.id === appt.id) setDetailAppt(prev => ({ ...prev, status }))
+    if (status === 'Completed' && profile?.googleReviewLink) sendReviewRequest(appt)
+  }
+
+  async function sendReviewRequest(appt) {
+    const phone = appt.patientPhone
+    const email = appt.patientEmail
+    if (!phone && !email) return
+    const alreadySent = appt.reviewSent ||
+      appointments.some(a => a.reviewSent && a.id !== appt.id && (phone ? a.patientPhone === phone : a.patientEmail === email))
+    if (alreadySent) return
+    const firstName = (appt.patient || 'there').split(' ')[0]
+    const link = profile.googleReviewLinkShort || profile.googleReviewLink
+    try {
+      if (phone) {
+        await httpsCallable(functions, 'sendSMS')({ to: phone, message: `Hi ${firstName}, thank you for your visit! We'd love your feedback. Please leave us a Google review: ${link}` })
+      } else {
+        await httpsCallable(functions, 'sendEmail')({
+          to: email,
+          subject: 'Thank you for your visit — please leave us a review',
+          htmlBody: `<p>Hi ${firstName}, thank you for your visit! We would love your feedback.</p><p><a href="${link}">Leave a Google Review</a></p>`,
+        })
+      }
+      await Promise.all([
+        addDoc(collection(db, 'users', uid, 'messages'), {
+          to: phone || email, type: phone ? 'sms' : 'email',
+          body: `Review request sent to ${firstName}`,
+          module: 'review-request', status: 'sent', sentAt: serverTimestamp(),
+        }),
+        updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reviewSent: true }),
+      ])
+    } catch { /* non-blocking */ }
   }
 
   async function sendReminder(appt) {
@@ -2296,7 +2387,7 @@ function Appointments() {
     try {
       const fn  = httpsCallable(functions, 'sendSMS')
       const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
-      const msg = `Reminder: ${appt.patient}, you have an appointment on ${appt.date} at ${appt.time}${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Confirm, cancel or reschedule: ${link}`
+      const msg = `Reminder: ${appt.patient}, you have an appointment on ${fmtDate(appt.date)} at ${appt.time}${appt.practitioner ? ` with ${appt.practitioner}` : ''}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.patientPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), {
@@ -2315,15 +2406,15 @@ function Appointments() {
     { key: 'status', label: 'Status', render: r => (
       <div className="space-y-1">
         <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
-          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${BADGE_COLORS[r.status] || 'bg-surface-2 text-ink-secondary'}`}>
+          className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${BADGE_COLORS[r.status] || 'bg-slate-50 text-slate-600'}`}>
           {APPT_STATUS.map(s => <option key={s}>{s}</option>)}
         </select>
         {r.confirmationStatus && (
           r.confirmationStatus === 'reschedule-requested' ? (
             <div className="mt-1 space-y-1" onClick={e => e.stopPropagation()}>
               <span className="block w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">⟳ Reschedule requested</span>
-              {r.rescheduleDate && <p className="text-[10px] text-ink-secondary">{r.rescheduleDate} {r.rescheduleTime || ''}</p>}
-              {r.rescheduleNote && <p className="text-[10px] italic text-ink-secondary">{r.rescheduleNote}</p>}
+              {r.rescheduleDate && <p className="text-[10px] text-slate-600">{fmtDate(r.rescheduleDate)} {r.rescheduleTime || ''}</p>}
+              {r.rescheduleNote && <p className="text-[10px] italic text-slate-600">{r.rescheduleNote}</p>}
               <div className="flex gap-1">
                 <button onClick={() => acceptReschedule(r)} disabled={rescheduleBusy === r.id}
                   className="rounded px-2 py-0.5 text-[10px] font-semibold bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50 transition">Accept</button>
@@ -2341,8 +2432,8 @@ function Appointments() {
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => openEdit(r)} className="rounded p-1 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
-        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+        <button onClick={() => openEdit(r)} className="rounded p-1 text-primary hover:bg-primary/10"><Pencil size={14} /></button>
+        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} className="rounded p-1 text-primary hover:bg-primary/10 disabled:opacity-50">
           {sendingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
         </button>
         <button onClick={() => { if (!window.confirm('Delete this appointment? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'appointments', r.id)) }}
@@ -2359,8 +2450,8 @@ function Appointments() {
       {/* Page header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-ink">Appointments</h2>
-          <p className="mt-0.5 text-xs text-ink-secondary">{todayAppts} today · {scheduled} upcoming</p>
+          <h2 className="text-lg font-bold text-slate-800">Appointments</h2>
+          <p className="mt-0.5 text-xs text-slate-600">{todayAppts} today · {scheduled} upcoming</p>
         </div>
         <button onClick={() => openNew()}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
@@ -2369,38 +2460,38 @@ function Appointments() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-white px-4 py-2.5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
         <div className="flex items-center gap-2">
           <button onClick={goToday}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition">
             Today
           </button>
           <div className="flex">
-            <button onClick={navPrev} className="rounded-l-lg border border-border p-1.5 text-ink hover:bg-surface-2 transition">
+            <button onClick={navPrev} className="rounded-l-lg border border-slate-200 p-1.5 text-slate-800 hover:bg-slate-50 transition">
               <ChevronLeft size={15} />
             </button>
-            <button onClick={navNext} className="rounded-r-lg border-y border-r border-border p-1.5 text-ink hover:bg-surface-2 transition">
+            <button onClick={navNext} className="rounded-r-lg border-y border-r border-slate-200 p-1.5 text-slate-800 hover:bg-slate-50 transition">
               <ChevronRight size={15} />
             </button>
           </div>
-          <span className="text-sm font-semibold text-ink">{rangeLabel}</span>
+          <span className="text-sm font-semibold text-slate-800">{rangeLabel}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-lg border border-border">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200">
             {[{ key: 'day', label: 'Day' }, { key: 'week', label: 'Week' }].map(v => (
               <button key={v.key} onClick={() => switchCalView(v.key)}
-                className={`px-3 py-1.5 text-xs font-semibold transition ${calView === v.key ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+                className={`px-3 py-1.5 text-xs font-semibold transition ${calView === v.key ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
                 {v.label}
               </button>
             ))}
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-border">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200">
             <button onClick={() => setMainView('calendar')} title="Calendar"
-              className={`p-2 transition ${mainView === 'calendar' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              className={`p-2 transition ${mainView === 'calendar' ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
               <CalendarDays size={14} />
             </button>
             <button onClick={() => setMainView('list')} title="List"
-              className={`p-2 border-l border-border transition ${mainView === 'list' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              className={`p-2 border-l border-slate-200 transition ${mainView === 'list' ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
               <LayoutList size={14} />
             </button>
           </div>
@@ -2414,28 +2505,28 @@ function Appointments() {
 
       {/* ── Calendar view ── */}
       {mainView === 'calendar' && (
-        <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm select-none">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm select-none">
 
           {/* Day header */}
-          <div className="flex border-b border-border bg-white sticky top-0 z-10">
+          <div className="flex border-b border-slate-200 bg-white sticky top-0 z-10">
             {/* GMT label */}
-            <div className="w-[52px] flex-shrink-0 border-r border-border flex items-end justify-center pb-2">
-              <span className="text-[9px] font-semibold text-ink-secondary">SAST</span>
+            <div className="w-[52px] flex-shrink-0 border-r border-slate-200 flex items-end justify-center pb-2">
+              <span className="text-[9px] font-semibold text-slate-600">SAST</span>
             </div>
             {days.map((d, i) => {
               const ds      = fmtDateStr(d)
               const isToday = ds === todayStr
               const count   = (apptsByDate[ds] || []).length
               return (
-                <div key={i} className={`flex-1 border-r last:border-r-0 border-border py-2 flex flex-col items-center gap-0.5 ${isToday ? 'bg-primary-light/20' : ''}`}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-widest ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                <div key={i} className={`flex-1 border-r last:border-r-0 border-slate-200 py-2 flex flex-col items-center gap-0.5 ${isToday ? 'bg-primary/10/20' : ''}`}>
+                  <p className={`text-[10px] font-semibold uppercase tracking-widest ${isToday ? 'text-primary' : 'text-slate-600'}`}>
                     {DAY_LABELS[i % 7]}
                   </p>
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-primary text-white' : 'text-ink'}`}>
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-primary text-white' : 'text-slate-800'}`}>
                     {d.getDate()}
                   </div>
                   {count > 0 && (
-                    <span className={`text-[9px] font-semibold ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                    <span className={`text-[9px] font-semibold ${isToday ? 'text-primary' : 'text-slate-600'}`}>
                       {count} appt{count !== 1 ? 's' : ''}
                     </span>
                   )}
@@ -2449,10 +2540,10 @@ function Appointments() {
             <div className="flex">
 
               {/* Time gutter */}
-              <div className="w-[52px] flex-shrink-0 border-r border-border relative" style={{ height: CAL_TOTAL_H }}>
+              <div className="w-[52px] flex-shrink-0 border-r border-slate-200 relative" style={{ height: CAL_TOTAL_H }}>
                 {CAL_HOURS.map(h => (
                   <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H - 8, right: 6 }}>
-                    <span className="text-[10px] text-ink-secondary/70 font-medium whitespace-nowrap">{fmtHour(h)}</span>
+                    <span className="text-[10px] text-slate-600/70 font-medium whitespace-nowrap">{fmtHour(h)}</span>
                   </div>
                 ))}
               </div>
@@ -2466,7 +2557,7 @@ function Appointments() {
 
                 return (
                   <div key={di}
-                    className={`flex-1 border-r last:border-r-0 border-border relative ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}
+                    className={`flex-1 border-r last:border-r-0 border-slate-200 relative ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}
                     style={{ height: CAL_TOTAL_H }}
                     onClick={e => {
                       const rect = e.currentTarget.getBoundingClientRect()
@@ -2478,12 +2569,12 @@ function Appointments() {
                     {/* Hour lines */}
                     {CAL_HOURS.map(h => (
                       <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H, left: 0, right: 0 }}
-                        className="border-t border-border/40" />
+                        className="border-t border-slate-200/40" />
                     ))}
                     {/* Half-hour lines */}
                     {CAL_HOURS.map(h => (
                       <div key={`${h}h`} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H + SLOT_H / 2, left: 0, right: 0 }}
-                        className="border-t border-dashed border-border/25" />
+                        className="border-t border-dashed border-slate-200/25" />
                     ))}
 
                     {/* Current time indicator — only on today's column */}
@@ -2506,7 +2597,7 @@ function Appointments() {
           </div>
 
           {/* Legend */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 bg-surface-2/40 px-4 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200/60 bg-slate-50/40 px-4 py-2">
             {APPT_STATUS.map(s => {
               const c = BLOCK_COLORS[s] || { border: '#9CA3AF', text: '#374151' }
               return (
@@ -2549,14 +2640,14 @@ function Appointments() {
         </div>
 
         {/* SMS toggle */}
-        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-3">
+        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <input type="checkbox" checked={sendSms} onChange={e => setSendSms(e.target.checked)}
             className="h-4 w-4 accent-primary" />
           <div>
-            <p className="text-sm font-semibold text-ink">
+            <p className="text-sm font-semibold text-slate-800">
               Send SMS {editing ? 'update' : 'confirmation'} to patient
             </p>
-            <p className="text-xs text-ink-secondary">
+            <p className="text-xs text-slate-600">
               {selectedPatient?.phone
                 ? `Will send to ${selectedPatient.phone}`
                 : 'Select a patient with a phone number'}
@@ -2580,9 +2671,9 @@ function Appointments() {
           <div className="space-y-4">
             {/* Header card */}
             <div className="rounded-xl px-4 py-3" style={{ backgroundColor: BLOCK_COLORS[detailAppt.status]?.bg || '#F9FAFB', borderLeft: `4px solid ${BLOCK_COLORS[detailAppt.status]?.border || '#9CA3AF'}` }}>
-              <p className="font-bold text-ink">{detailAppt.patient}</p>
-              <p className="text-sm text-ink-secondary mt-0.5">
-                {detailAppt.date} · {detailAppt.time} · {detailAppt.duration} min
+              <p className="font-bold text-slate-800">{detailAppt.patient}</p>
+              <p className="text-sm text-slate-600 mt-0.5">
+                {fmtDate(detailAppt.date)} · {detailAppt.time} · {detailAppt.duration} min
                 {detailAppt.practitioner ? ` · ${detailAppt.practitioner}` : ''}
               </p>
             </div>
@@ -2594,28 +2685,28 @@ function Appointments() {
                 { label: 'Status', value: detailAppt.status },
                 { label: 'SMS Reminder', value: detailAppt.reminderSent ? 'Sent ✓' : 'Not sent' },
               ].map(({ label, value }) => (
-                <div key={label} className="rounded-xl bg-surface-2 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
-                  <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                <div key={label} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</p>
+                  <p className="mt-0.5 text-sm font-medium text-slate-800">{value}</p>
                 </div>
               ))}
             </div>
 
             {(detailAppt.reason || detailAppt.notes) && (
-              <div className="rounded-xl bg-surface-2 px-3 py-2.5 space-y-1">
-                {detailAppt.reason && <p className="text-xs text-ink"><span className="font-semibold">Reason:</span> {detailAppt.reason}</p>}
-                {detailAppt.notes  && <p className="text-xs text-ink"><span className="font-semibold">Notes:</span>  {detailAppt.notes}</p>}
+              <div className="rounded-xl bg-slate-50 px-3 py-2.5 space-y-1">
+                {detailAppt.reason && <p className="text-xs text-slate-800"><span className="font-semibold">Reason:</span> {detailAppt.reason}</p>}
+                {detailAppt.notes  && <p className="text-xs text-slate-800"><span className="font-semibold">Notes:</span>  {detailAppt.notes}</p>}
               </div>
             )}
 
             {/* Quick status */}
             <div>
-              <p className="mb-2 text-xs font-semibold text-ink-secondary">Update status</p>
+              <p className="mb-2 text-xs font-semibold text-slate-600">Update status</p>
               <div className="flex flex-wrap gap-1.5">
                 {APPT_STATUS.map(s => (
                   <button key={s} onClick={() => setApptStatus(detailAppt, s)}
                     style={detailAppt.status === s ? { backgroundColor: BLOCK_COLORS[s]?.bg, color: BLOCK_COLORS[s]?.text, borderColor: BLOCK_COLORS[s]?.border } : {}}
-                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${detailAppt.status === s ? 'border-current' : 'border-border text-ink-secondary hover:bg-surface-2'}`}>
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${detailAppt.status === s ? 'border-current' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                     {s}
                   </button>
                 ))}
@@ -2624,11 +2715,11 @@ function Appointments() {
 
             <div className="grid grid-cols-3 gap-2">
               <button onClick={() => openEdit(detailAppt)}
-                className="flex items-center justify-center gap-1.5 rounded-xl border border-border py-2 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition">
                 <Pencil size={12} /> Edit
               </button>
               <button onClick={() => sendReminder(detailAppt)} disabled={sendingId === detailAppt.id}
-                className="flex items-center justify-center gap-1.5 rounded-xl border border-border py-2 text-xs font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 transition">
                 {sendingId === detailAppt.id ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />}
                 Remind
               </button>
@@ -2784,7 +2875,7 @@ function Reports() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Medical Reports</h2>
+        <h2 className="text-base font-bold text-slate-800">Medical Reports</h2>
         <button onClick={() => { setForm(REPORT_BLANK); setOpen(true) }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
           <PlusCircle size={15} /> New Report
@@ -2833,9 +2924,9 @@ function Reports() {
 
           <ReferralFormSection title="Recommendations & Consent" icon={ClipboardList}>
             <div className="col-span-2"><Field label="Recommendations" textarea value={form.recommendations} onChange={set('recommendations')} /></div>
-            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-border bg-amber-50 px-4 py-3 text-sm text-ink">
+            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-amber-50 px-4 py-3 text-sm text-slate-800">
               <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
-                className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
+                className="h-4 w-4 rounded border-slate-200 text-primary focus:ring-primary" />
               <span>Patient consent obtained to release this report <span className="font-semibold text-amber-700">(POPIA)</span></span>
             </label>
           </ReferralFormSection>
@@ -2848,15 +2939,15 @@ function Reports() {
       <Modal open={!!viewing} onClose={() => { setViewing(null); setEditing(false) }} title={editing ? 'Edit Report' : (viewing?.reportType || 'Medical Report')} size="xl">
         {viewing && !editing && (
           <div className="text-sm">
-            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+            <div className="-mx-6 -mt-2 mb-4 border-b border-slate-200 bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
                     {initials(viewing.patient)}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
-                    <p className="text-xs text-ink-secondary">{viewing.reportType || 'Medical Report'}</p>
+                    <h3 className="text-base font-bold leading-tight text-slate-800">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-slate-600">{viewing.reportType || 'Medical Report'}</p>
                   </div>
                 </div>
                 {viewing.fitForWork && (
@@ -2866,24 +2957,24 @@ function Reports() {
               <div className="mt-3 flex flex-wrap gap-5 text-xs">
                 {viewing.patientIdNumber && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.patientIdNumber}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.patientIdNumber}</p>
                   </div>
                 )}
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
-                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-slate-800">{fmtDate(viewing.date)}</p>
                 </div>
                 {viewing.practitioner && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Practitioner</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.practitioner}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.practitioner}</p>
                   </div>
                 )}
                 {viewing.recipient && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Addressed To</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.recipient}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Addressed To</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.recipient}</p>
                   </div>
                 )}
               </div>
@@ -2896,28 +2987,28 @@ function Reports() {
               <ToolbarBtn onClick={() => openEmail(viewing)} icon={Mail} primary>Email to Doctor</ToolbarBtn>
             </Toolbar>
 
-            <div className="overflow-hidden rounded-xl border border-border">
-              <div className="border-b border-border">
-                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Report Details</h4>
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="border-b border-slate-200">
+                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Report Details</h4>
                 </div>
                 <div className="grid grid-cols-2 divide-x divide-border/70">
                   <ReferralField label="Report Type" value={viewing.reportType} />
                   <ReferralField label="Diagnosis" value={viewing.diagnosis} />
                 </div>
                 {viewing.icd10 && (
-                  <div className="border-t border-border/70">
+                  <div className="border-t border-slate-200/70">
                     <ReferralField label="ICD-10 Code(s)" value={viewing.icd10} full />
                   </div>
                 )}
               </div>
 
               {(viewing.history || viewing.clinicalFindings || viewing.treatment || viewing.prognosis) && (
-                <div className="border-b border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Clinical Content</h4>
+                <div className="border-b border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><FileText size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Clinical Content</h4>
                   </div>
                   <div className="divide-y divide-border/70">
                     {viewing.history && <ReferralField label="Relevant History" value={viewing.history} full />}
@@ -2929,17 +3020,17 @@ function Reports() {
               )}
 
               {viewing.fitForWork && (
-                <div className="border-b border-border">
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Activity size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Fitness / Booking Off</h4>
+                <div className="border-b border-slate-200">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Activity size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Fitness / Booking Off</h4>
                   </div>
                   <div className="grid grid-cols-2 divide-x divide-border/70">
                     <ReferralField label="Status" value={viewing.fitForWork} />
                     <ReferralField label="Days Booked Off" value={viewing.daysBookedOff} />
                   </div>
                   {(viewing.fromDate || viewing.toDate) && (
-                    <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                    <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-slate-200/70">
                       <ReferralField label="From" value={fmtDate(viewing.fromDate)} />
                       <ReferralField label="To" value={fmtDate(viewing.toDate)} />
                     </div>
@@ -2949,9 +3040,9 @@ function Reports() {
 
               {viewing.recommendations && (
                 <div>
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><ClipboardList size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Recommendations</h4>
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><ClipboardList size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Recommendations</h4>
                   </div>
                   <ReferralField label="Recommendations" value={viewing.recommendations} full />
                 </div>
@@ -3002,7 +3093,7 @@ function Reports() {
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
               </button>
               <button onClick={() => setEditing(false)}
-                className="rounded-xl border border-border px-5 py-2.5 text-sm font-semibold text-ink-secondary hover:border-primary">
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:border-primary">
                 Cancel
               </button>
             </div>
@@ -3015,7 +3106,7 @@ function Reports() {
         <div className="space-y-4">
           <Field label="Recipient Email *" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="doctor@practice.co.za" />
           <Field label="Message" textarea value={emailMsg} onChange={e => setEmailMsg(e.target.value)} />
-          <p className="rounded-xl bg-surface-2 p-3 text-xs text-ink-secondary">
+          <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
             The report will be attached as a branded PDF and sent securely from your practice address.
           </p>
           <button onClick={sendEmailToDoctor} disabled={busy === 'email'}
@@ -3034,8 +3125,8 @@ function Reports() {
 function ReferralField({ label, value, full }) {
   return (
     <div className={`px-4 py-3 ${full ? 'col-span-2' : ''}`}>
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary/60">{label}</p>
-      <p className={`text-sm leading-snug ${value ? 'text-ink' : 'italic text-ink-secondary/30'}`}>{value || '—'}</p>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600/60">{label}</p>
+      <p className={`text-sm leading-snug ${value ? 'text-slate-800' : 'italic text-slate-600/30'}`}>{value || '—'}</p>
     </div>
   )
 }
@@ -3043,10 +3134,10 @@ function ReferralField({ label, value, full }) {
 // Titled section card wrapping form fields in new/edit modals
 function ReferralFormSection({ title, icon: Icon, children }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Icon size={13} /></span>}
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">{title}</h4>
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Icon size={13} /></span>}
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">{title}</h4>
       </div>
       <div className="grid grid-cols-2 gap-3 p-4">{children}</div>
     </div>
@@ -3056,10 +3147,10 @@ function ReferralFormSection({ title, icon: Icon, children }) {
 // Titled section card for view modals with free-form children (no forced grid)
 function RecordViewSection({ title, icon: Icon, children }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <div className="flex items-center gap-2 border-b border-border/70 bg-surface-2 px-4 py-2.5">
-        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><Icon size={13} /></span>}
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">{title}</h4>
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5">
+        {Icon && <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><Icon size={13} /></span>}
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">{title}</h4>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -3196,9 +3287,9 @@ function Referrals() {
 
   const badge = s => ({
     Sent: 'bg-blue-50 text-blue-600', Acknowledged: 'bg-purple-50 text-purple-600',
-    'Appointment Booked': 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600',
+    'Appointment Booked': 'bg-primary/10 text-primary', Completed: 'bg-green-50 text-green-600',
     Declined: 'bg-red-50 text-red-500',
-  }[s] || 'bg-surface-2 text-ink-secondary')
+  }[s] || 'bg-slate-50 text-slate-600')
 
   const cols = [
     { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
@@ -3221,7 +3312,7 @@ function Referrals() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-ink">Referrals</h2>
+        <h2 className="text-base font-bold text-slate-800">Referrals</h2>
         <button onClick={() => { setForm(REFERRAL_BLANK); setOpen(true) }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
           <PlusCircle size={15} /> New Referral
@@ -3264,9 +3355,9 @@ function Referrals() {
           <ReferralFormSection title="Medical Aid & Authorisation" icon={CreditCard}>
             <Field label="Medical Aid (auto-filled)" value={form.medicalAid} onChange={set('medicalAid')} />
             <Field label="Pre-Authorisation No." value={form.authNumber} onChange={set('authNumber')} />
-            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-border bg-amber-50 px-4 py-3 text-sm text-ink">
+            <label className="col-span-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-amber-50 px-4 py-3 text-sm text-slate-800">
               <input type="checkbox" checked={form.consentObtained} onChange={e => setForm(f => ({ ...f, consentObtained: e.target.checked }))}
-                className="h-4 w-4 rounded border-border text-primary focus:ring-primary" />
+                className="h-4 w-4 rounded border-slate-200 text-primary focus:ring-primary" />
               <span>Patient consent obtained to share clinical information with the specialist <span className="font-semibold text-amber-700">(POPIA)</span></span>
             </label>
           </ReferralFormSection>
@@ -3281,15 +3372,15 @@ function Referrals() {
         {viewing && !editing && (
           <div className="text-sm">
             {/* Header */}
-            <div className="-mx-6 -mt-2 mb-4 border-b border-border bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
+            <div className="-mx-6 -mt-2 mb-4 border-b border-slate-200 bg-gradient-to-r from-primary-light/60 to-white px-6 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm">
                     {initials(viewing.patient)}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold leading-tight text-ink">{viewing.patient || '—'}</h3>
-                    <p className="text-xs text-ink-secondary">Referral Letter</p>
+                    <h3 className="text-base font-bold leading-tight text-slate-800">{viewing.patient || '—'}</h3>
+                    <p className="text-xs text-slate-600">Referral Letter</p>
                   </div>
                 </div>
                 <StatusPill label={viewing.status} tone={REFERRAL_TONE[viewing.status] || 'slate'} />
@@ -3297,23 +3388,23 @@ function Referrals() {
               <div className="mt-3 flex flex-wrap gap-5 text-xs">
                 {viewing.patientIdNumber && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">ID Number</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.patientIdNumber}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">ID Number</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.patientIdNumber}</p>
                   </div>
                 )}
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Date</p>
-                  <p className="mt-0.5 font-semibold text-ink">{fmtDate(viewing.date)}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Date</p>
+                  <p className="mt-0.5 font-semibold text-slate-800">{fmtDate(viewing.date)}</p>
                 </div>
                 {viewing.referringPractitioner && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Referring Practitioner</p>
-                    <p className="mt-0.5 font-semibold text-ink">{viewing.referringPractitioner}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Referring Practitioner</p>
+                    <p className="mt-0.5 font-semibold text-slate-800">{viewing.referringPractitioner}</p>
                   </div>
                 )}
                 {viewing.urgency && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary/60">Urgency</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600/60">Urgency</p>
                     <div className="mt-1"><StatusPill label={viewing.urgency} tone={URGENCY_TONE[viewing.urgency] || 'slate'} /></div>
                   </div>
                 )}
@@ -3330,29 +3421,29 @@ function Referrals() {
             </Toolbar>
 
             {/* Form-grid sections */}
-            <div className="overflow-hidden rounded-xl border border-border">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
 
               {/* Refer To (Specialist) */}
-              <div className="border-b border-border">
-                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><UserCircle size={13} /></span>
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Refer To (Specialist)</h4>
+              <div className="border-b border-slate-200">
+                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><UserCircle size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Refer To (Specialist)</h4>
                 </div>
                 <div className="grid grid-cols-2 divide-x divide-border/70">
                   <ReferralField label="Specialist" value={viewing.specialist} />
                   <ReferralField label="Discipline" value={viewing.specialistDiscipline} />
                 </div>
-                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70">
+                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-slate-200/70">
                   <ReferralField label="Practice / Hospital" value={viewing.specialistPractice} />
                   <ReferralField label="Contact" value={viewing.specialistContact} />
                 </div>
               </div>
 
               {/* Clinical Information */}
-              <div className="border-b border-border">
-                <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><FileText size={13} /></span>
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Clinical Information</h4>
+              <div className="border-b border-slate-200">
+                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><FileText size={13} /></span>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Clinical Information</h4>
                 </div>
                 <div className="divide-y divide-border/70">
                   {viewing.reason && (
@@ -3370,9 +3461,9 @@ function Referrals() {
               {/* Medical Aid & Authorisation */}
               {(viewing.medicalAid || viewing.authNumber) && (
                 <div>
-                  <div className="flex items-center gap-2 bg-surface-2 px-4 py-2.5">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary-light text-primary"><CreditCard size={13} /></span>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink">Medical Aid & Authorisation</h4>
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary"><CreditCard size={13} /></span>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-800">Medical Aid & Authorisation</h4>
                   </div>
                   <div className="grid grid-cols-2 divide-x divide-border/70">
                     <ReferralField label="Medical Aid" value={viewing.medicalAid} />
@@ -3423,7 +3514,7 @@ function Referrals() {
                 {savingEdit ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Changes</>}
               </button>
               <button onClick={() => setEditing(false)}
-                className="rounded-xl border border-border px-5 py-2.5 text-sm font-semibold text-ink-secondary hover:border-primary">
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:border-primary">
                 Cancel
               </button>
             </div>
@@ -3436,7 +3527,7 @@ function Referrals() {
         <div className="space-y-4">
           <Field label="Specialist Email *" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="specialist@practice.co.za" />
           <Field label="Message" textarea value={emailMsg} onChange={e => setEmailMsg(e.target.value)} />
-          <p className="rounded-xl bg-surface-2 p-3 text-xs text-ink-secondary">
+          <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
             The referral will be attached as a branded PDF letter and sent securely from your practice address.
           </p>
           <button onClick={sendEmailToSpecialist} disabled={busy === 'email'}
@@ -3449,37 +3540,6 @@ function Referrals() {
   )
 }
 
-
-// ── Messages ──────────────────────────────────────────────────────────────────
-function Messages() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const messages = useCollection(uid ? `users/${uid}/messages` : null)
-  const sorted = useMemo(() => [...messages].sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0)), [messages])
-  const counts = useMemo(() => { const c = { sms: 0, email: 0, whatsapp: 0 }; messages.forEach(m => { if (m.type in c) c[m.type]++ }); return c }, [messages])
-  const channelBadge = t => ({ sms: 'bg-blue-100 text-blue-600', email: 'bg-emerald-100 text-emerald-700', whatsapp: 'bg-green-100 text-green-600' }[t] ?? 'bg-gray-100 text-gray-500')
-  const cols = [
-    { key: 'type', label: 'Channel', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${channelBadge(r.type)}`}>{r.type}</span> },
-    { key: 'to', label: 'Recipient' },
-    { key: 'body', label: 'Message', render: r => <span className="line-clamp-2 max-w-xs text-sm text-ink-secondary">{r.body}</span> },
-    { key: 'module', label: 'Source', render: r => <span className="capitalize text-xs text-ink-secondary">{(r.module || '—').replace(/-/g, ' ')}</span> },
-    { key: 'sentAt', label: 'Sent', render: r => <span className="text-xs text-ink-secondary">{r.sentAt?.toDate?.()?.toLocaleDateString('en-ZA') ?? '—'}</span> },
-  ]
-  return (
-    <div className="space-y-4">
-      <div><h2 className="text-base font-bold text-ink">Messages</h2><p className="mt-0.5 text-sm text-ink-secondary">Log of all messages sent from your account</p></div>
-      <div className="grid grid-cols-3 gap-4">
-        {[{ label: 'SMS Sent', val: counts.sms, color: 'text-blue-600' }, { label: 'Emails Sent', val: counts.email, color: 'text-emerald-600' }, { label: 'WhatsApp Sent', val: counts.whatsapp, color: 'text-green-600' }].map(s => (
-          <div key={s.label} className="rounded-card border border-border bg-white p-4 shadow-card text-center">
-            <p className={`text-2xl font-extrabold ${s.color}`}>{s.val}</p>
-            <p className="mt-1 text-xs font-semibold text-ink-secondary">{s.label}</p>
-          </div>
-        ))}
-      </div>
-      <DataTable columns={cols} data={sorted} emptyMessage="No messages sent yet. Use Campaigns or send appointment reminders to get started." />
-    </div>
-  )
-}
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
@@ -3497,13 +3557,12 @@ export default function MedicalDashboard() {
         <Route path="practitioners" element={<Practitioners />} />
         <Route path="reports" element={<Reports />} />
         <Route path="referrals" element={<Referrals />} />
-        <Route path="messages" element={<Messages />} />
         <Route path="surveys" element={<SurveysModule industry="medical" />} />
-        <Route path="campaigns" element={<CampaignsModule industry="medical" />} />
+        <Route path="campaigns"    element={<CampaignsModule industry="medical" />} />
+        <Route path="automations" element={<AutomationsModule industry="medical" />} />
         <Route path="profile" element={<ProfilePage industry="medical" />} />
-
         <Route path="settings" element={<Settings />} />
-        <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
+        <Route path="*" element={<div><h2 className="text-base font-bold text-slate-800 mb-3">Coming Soon</h2><p className="text-sm text-slate-600">This section is being built.</p></div>} />
       </Routes>
     </DashboardLayout>
   )

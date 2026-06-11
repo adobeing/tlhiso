@@ -28,7 +28,7 @@ export const BADGE_COLORS = {
   Scheduled:  'bg-blue-50 text-blue-700',
   Confirmed:  'bg-green-50 text-green-700',
   Arrived:    'bg-purple-50 text-purple-700',
-  Completed:  'bg-primary-light text-primary',
+  Completed:  'bg-primary/10 text-primary',
   Cancelled:  'bg-red-50 text-red-600',
   'No-show':  'bg-orange-50 text-orange-600',
 }
@@ -109,7 +109,12 @@ function CalApptBlock({ appt, layout, onClick }) {
       }}
       className="rounded-md px-1.5 py-0.5 text-left overflow-hidden shadow-sm hover:brightness-95 transition-all"
     >
-      <p className="text-[10px] font-bold leading-tight truncate">{appt.time} — {appt.customer || appt.patient}</p>
+      <div className="flex items-start justify-between gap-0.5">
+        <p className="text-[10px] font-bold leading-tight truncate">{appt.time} — {appt.customer || appt.patient}</p>
+        {appt.confirmationStatus === 'reschedule-requested' && (
+          <span title="Reschedule requested" style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
+        )}
+      </div>
       {height > 32 && (
         <p className="text-[9px] leading-tight opacity-75 truncate">
           {appt.service || appt.purpose || appt.appointmentType || appt.reason || ''}
@@ -168,12 +173,13 @@ export default function AppointmentCalendar({
     else setAnchor(getWeekStart(new Date()))
   }
 
+  const TZ = { timeZone: 'Africa/Johannesburg' }
   const rangeLabel = useMemo(() => {
-    if (calView === 'day') return anchor.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    if (calView === 'day') return anchor.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', ...TZ })
     const ws = days[0]; const we = days[6]
     return ws.getMonth() === we.getMonth()
-      ? `${ws.getDate()}–${we.getDate()} ${ws.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`
-      : `${ws.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })} – ${we.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}`
+      ? `${ws.getDate()}–${we.getDate()} ${ws.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', ...TZ })}`
+      : `${ws.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', ...TZ })} – ${we.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', ...TZ })}`
   }, [calView, anchor, days])
 
   const apptsByDate = useMemo(() => {
@@ -189,53 +195,68 @@ export default function AppointmentCalendar({
   const nowTop  = (nowMins - CAL_START * 60) / 60 * SLOT_H
   const showNow = nowTop >= 0 && nowTop < CAL_TOTAL_H
 
+  const pendingReschedules = appointments.filter(a => a.confirmationStatus === 'reschedule-requested').length
+
   return (
     <div className="space-y-4">
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-ink">{title}</h2>
-          <p className="mt-0.5 text-xs text-ink-secondary">
+          <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+          <p className="mt-0.5 text-xs text-slate-600">
             {subtitle || `${todayCount} today · ${upcoming} upcoming`}
           </p>
         </div>
         {headerAction}
       </div>
 
+      {/* Reschedule request banner */}
+      {pendingReschedules > 0 && (
+        <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+          <span className="text-sm font-medium text-amber-800">
+            ⟳ {pendingReschedules} reschedule request{pendingReschedules > 1 ? 's' : ''} pending — check the list view to accept or decline
+          </span>
+          <button onClick={() => setMainView('list')}
+            className="text-xs font-semibold text-amber-700 hover:underline">
+            View list →
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white px-4 py-2.5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white px-4 py-2.5 shadow-sm">
         <div className="flex items-center gap-2">
           <button onClick={goToday}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-surface-2">
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 transition hover:bg-slate-50">
             Today
           </button>
           <div className="flex">
-            <button onClick={navPrev} className="rounded-l-lg border border-border p-1.5 text-ink transition hover:bg-surface-2">
+            <button onClick={navPrev} className="rounded-l-lg border border-slate-200 p-1.5 text-slate-800 transition hover:bg-slate-50">
               <ChevronLeft size={15} />
             </button>
-            <button onClick={navNext} className="rounded-r-lg border-y border-r border-border p-1.5 text-ink transition hover:bg-surface-2">
+            <button onClick={navNext} className="rounded-r-lg border-y border-r border-slate-200 p-1.5 text-slate-800 transition hover:bg-slate-50">
               <ChevronRight size={15} />
             </button>
           </div>
-          <span className="text-sm font-semibold text-ink">{rangeLabel}</span>
+          <span className="text-sm font-semibold text-slate-800">{rangeLabel}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-lg border border-border">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200">
             {[{ key: 'day', label: 'Day' }, { key: 'week', label: 'Week' }].map(v => (
               <button key={v.key} onClick={() => switchCalView(v.key)}
-                className={`px-3 py-1.5 text-xs font-semibold transition ${calView === v.key ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+                className={`px-3 py-1.5 text-xs font-semibold transition ${calView === v.key ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
                 {v.label}
               </button>
             ))}
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-border">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200">
             <button onClick={() => setMainView('calendar')} title="Calendar"
-              className={`p-2 transition ${mainView === 'calendar' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              className={`p-2 transition ${mainView === 'calendar' ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
               <CalendarDays size={14} />
             </button>
             <button onClick={() => setMainView('list')} title="List"
-              className={`border-l border-border p-2 transition ${mainView === 'list' ? 'bg-primary text-white' : 'bg-white text-ink hover:bg-surface-2'}`}>
+              className={`border-l border-slate-200 p-2 transition ${mainView === 'list' ? 'bg-primary text-white' : 'bg-white text-slate-800 hover:bg-slate-50'}`}>
               <LayoutList size={14} />
             </button>
           </div>
@@ -249,27 +270,27 @@ export default function AppointmentCalendar({
 
       {/* Calendar view */}
       {mainView === 'calendar' && (
-        <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm select-none">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm select-none">
 
           {/* Day headers */}
-          <div className="flex border-b border-border bg-white sticky top-0 z-10">
-            <div className="w-[52px] flex-shrink-0 border-r border-border flex items-end justify-center pb-2">
-              <span className="text-[9px] font-semibold text-ink-secondary">SAST</span>
+          <div className="flex border-b border-slate-200 bg-white sticky top-0 z-10">
+            <div className="w-[52px] flex-shrink-0 border-r border-slate-200 flex items-end justify-center pb-2">
+              <span className="text-[9px] font-semibold text-slate-600">SAST</span>
             </div>
             {days.map((d, i) => {
               const ds      = fmtDateStr(d)
               const isToday = ds === todayStr
               const count   = (apptsByDate[ds] || []).length
               return (
-                <div key={i} className={`flex-1 border-r last:border-r-0 border-border py-2 flex flex-col items-center gap-0.5 ${isToday ? 'bg-primary-light/20' : ''}`}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-widest ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                <div key={i} className={`flex-1 border-r last:border-r-0 border-slate-200 py-2 flex flex-col items-center gap-0.5 ${isToday ? 'bg-primary/10/20' : ''}`}>
+                  <p className={`text-[10px] font-semibold uppercase tracking-widest ${isToday ? 'text-primary' : 'text-slate-600'}`}>
                     {DAY_LABELS[i % 7]}
                   </p>
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-primary text-white' : 'text-ink'}`}>
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'bg-primary text-white' : 'text-slate-800'}`}>
                     {d.getDate()}
                   </div>
                   {count > 0 && (
-                    <span className={`text-[9px] font-semibold ${isToday ? 'text-primary' : 'text-ink-secondary'}`}>
+                    <span className={`text-[9px] font-semibold ${isToday ? 'text-primary' : 'text-slate-600'}`}>
                       {count} appt{count !== 1 ? 's' : ''}
                     </span>
                   )}
@@ -282,10 +303,10 @@ export default function AppointmentCalendar({
           <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: 580 }}>
             <div className="flex">
               {/* Time gutter */}
-              <div className="w-[52px] flex-shrink-0 border-r border-border relative" style={{ height: CAL_TOTAL_H }}>
+              <div className="w-[52px] flex-shrink-0 border-r border-slate-200 relative" style={{ height: CAL_TOTAL_H }}>
                 {CAL_HOURS.map(h => (
                   <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H - 8, right: 6 }}>
-                    <span className="text-[10px] text-ink-secondary/70 font-medium whitespace-nowrap">
+                    <span className="text-[10px] text-slate-600/70 font-medium whitespace-nowrap">
                       {fmtHour(h)}
                     </span>
                   </div>
@@ -301,7 +322,7 @@ export default function AppointmentCalendar({
 
                 return (
                   <div key={di}
-                    className={`flex-1 border-r last:border-r-0 border-border relative ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}
+                    className={`flex-1 border-r last:border-r-0 border-slate-200 relative ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}
                     style={{ height: CAL_TOTAL_H }}
                     onClick={e => {
                       const rect  = e.currentTarget.getBoundingClientRect()
@@ -313,12 +334,12 @@ export default function AppointmentCalendar({
                     {/* Hour lines */}
                     {CAL_HOURS.map(h => (
                       <div key={h} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H, left: 0, right: 0 }}
-                        className="border-t border-border/40" />
+                        className="border-t border-slate-200/40" />
                     ))}
                     {/* Half-hour lines */}
                     {CAL_HOURS.map(h => (
                       <div key={`${h}h`} style={{ position: 'absolute', top: (h - CAL_START) * SLOT_H + SLOT_H / 2, left: 0, right: 0 }}
-                        className="border-t border-dashed border-border/25" />
+                        className="border-t border-dashed border-slate-200/25" />
                     ))}
 
                     {/* Now indicator */}
@@ -341,7 +362,7 @@ export default function AppointmentCalendar({
           </div>
 
           {/* Legend */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 bg-surface-2/40 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200/60 bg-slate-50/40 px-4 py-2.5">
             {APPT_STATUS.map(s => {
               const c = BLOCK_COLORS[s] || { border: '#9CA3AF', bg: '#F9FAFB', text: '#374151' }
               return (

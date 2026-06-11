@@ -51,10 +51,12 @@ export const INDUSTRIES = {
 
 export const INDUSTRY_LIST = Object.values(INDUSTRIES)
 
+// messages = campaign-only quota (SMS + email). Booking confirmations,
+// appointment reminders, and other operational messages are NOT counted.
 export const PLANS = {
-  starter: { key: 'starter', name: 'Starter', price: 699, messages: 100 },
-  business: { key: 'business', name: 'Business', price: 2699, messages: 50000, popular: true },
-  enterprise: { key: 'enterprise', name: 'Enterprise', price: 4999, messages: 250000 },
+  starter:    { key: 'starter',    name: 'Starter',       price: 699,  messages: 1000,  campaignOnly: true },
+  business:   { key: 'business',   name: 'Professional',  price: 2699, messages: 3000,  campaignOnly: true, popular: true, idealFor: 'Medical practices & doctors' },
+  enterprise: { key: 'enterprise', name: 'Business',      price: 4999, messages: 10000, campaignOnly: true, idealFor: 'B2B companies & property managers' },
 }
 export const PLAN_LIST = Object.values(PLANS)
 

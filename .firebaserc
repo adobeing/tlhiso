@@ -6,13 +6,18 @@
   "targets": {
     "tlhiso": {
       "hosting": {
-        "production": ["tlhiso"]
+        "production": [
+          "tlhiso"
+        ]
       }
     },
     "tlhiso-staging": {
       "hosting": {
-        "staging": ["tlhiso-staging"]
+        "staging": [
+          "tlhiso-staging"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

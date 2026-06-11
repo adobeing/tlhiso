@@ -10,6 +10,7 @@
   },
   "main": "index.js",
   "dependencies": {
+    "@google-cloud/speech": "^7.3.2",
     "@sendgrid/mail": "^8.1.0",
     "axios": "^1.7.0",
     "firebase-admin": "^13.10.0",

@@ -8,8 +8,9 @@ import { PLANS } from '../../utils/industries'
 import {
   User, Shield, Bell, CreditCard, Trash2, LogOut,
   AlertTriangle, CheckCircle, Mail, Lock, ChevronRight,
-  Loader2, HelpCircle, ChevronDown,
+  Loader2, HelpCircle, ChevronDown, ShieldCheck, Settings2,
 } from 'lucide-react'
+import PopiaModule from './PopiaModule'
 
 // ── Section ───────────────────────────────────────────────────────────────────
 function Section({ icon: Icon, title, description, children, danger }) {
@@ -166,6 +167,9 @@ export default function SettingsPage({ industry }) {
   const [deleteInput, setDeleteInput] = useState('')
   const [deleting,    setDeleting]    = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [activeTab,   setActiveTab]   = useState('settings')
+
+  const subCollection = { medical: 'patients', property: 'tenants' }[industry] ?? 'customers'
 
   const plan      = PLANS[profile?.plan ?? 'starter']
   const planLimit = plan?.messages ?? 100
@@ -221,6 +225,24 @@ export default function SettingsPage({ industry }) {
 
   return (
     <div className="max-w-4xl space-y-6">
+
+      {/* ── Tab nav ─────────────────────────────────────────────────────── */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+        <button onClick={() => setActiveTab('settings')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${activeTab === 'settings' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+          <Settings2 size={14} /> Settings
+        </button>
+        <button onClick={() => setActiveTab('popia')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${activeTab === 'popia' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+          <ShieldCheck size={14} /> POPIA Compliance
+        </button>
+      </div>
+
+      {/* ── POPIA tab ───────────────────────────────────────────────────── */}
+      {activeTab === 'popia' && <PopiaModule subCollection={subCollection} />}
+
+      {/* ── Settings tab ────────────────────────────────────────────────── */}
+      {activeTab === 'settings' && <>
 
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-gradient-to-br from-primary-light/50 to-surface-2 px-6 py-5">
@@ -372,12 +394,10 @@ export default function SettingsPage({ industry }) {
             label="POPIA compliance centre"
             hint="Consent records, data requests, breach logs"
             action={
-              <Link
-                to={`/${industry}/popia`}
-                className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-              >
+              <button onClick={() => setActiveTab('popia')}
+                className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
                 Open <ChevronRight size={13} />
-              </Link>
+              </button>
             }
           />
           <Row
@@ -478,6 +498,8 @@ export default function SettingsPage({ industry }) {
           }
         />
       </Section>
+
+      </>}
 
       {/* Delete confirmation modal */}
       {deleteOpen && (

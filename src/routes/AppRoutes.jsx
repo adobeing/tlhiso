@@ -5,6 +5,7 @@ import LegalPage from '../components/landing/LegalPage'
 import SurveyPage from '../components/public/SurveyPage'
 import PatientIntakePage from '../components/public/PatientIntakePage'
 import AppointmentResponsePage from '../components/public/AppointmentResponsePage'
+import UnsubscribePage from '../components/public/UnsubscribePage'
 import LoginPage from '../components/auth/LoginPage'
 import RegisterPage from '../components/auth/RegisterPage'
 import ForgotPasswordPage from '../components/auth/ForgotPasswordPage'
@@ -24,6 +25,7 @@ export default function AppRoutes() {
       <Route path="/survey/:userId/:surveyId" element={<SurveyPage />} />
       <Route path="/intake/:userId" element={<PatientIntakePage />} />
       <Route path="/appt/:userId/:appointmentId" element={<AppointmentResponsePage />} />
+      <Route path="/unsubscribe" element={<UnsubscribePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />

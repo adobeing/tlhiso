@@ -53,7 +53,7 @@
 | Email | SendGrid | — |
 | SMS | BulkSMS | South African API |
 | WhatsApp | Twilio | — |
-| Audio transcription | AssemblyAI | — |
+| Audio transcription | Google Cloud Speech-to-Text | — |
 | Font | Plus Jakarta Sans (Google Fonts) | — |
 
 ---
@@ -141,13 +141,9 @@ firebase functions:secrets:set SECRET_NAME
 | `TWILIO_AUTH_TOKEN` | Twilio | ✅ Set |
 | `TWILIO_WHATSAPP_NUMBER` | Twilio WhatsApp | ✅ Set |
 | `TWILIO_NUMBER` | Twilio SMS | ✅ Set |
-| `ASSEMBLYAI_API_KEY` | AssemblyAI transcription | ⬜ Not yet set |
+| ~~`ASSEMBLYAI_API_KEY`~~ | ~~AssemblyAI~~ — replaced by GCP Speech-to-Text | N/A |
 
-To set the AssemblyAI key when ready:
-```bash
-firebase functions:secrets:set ASSEMBLYAI_API_KEY
-firebase deploy --only functions:transcribeConsultation
-```
+> Transcription (`transcribeConsultation`) now uses **Google Cloud Speech-to-Text** via the function's service account. No API key is required. Enable the API at: [console.cloud.google.com → APIs → Cloud Speech-to-Text API](https://console.cloud.google.com/apis/library/speech.googleapis.com)
 
 ---
 
@@ -160,8 +156,9 @@ All functions are **2nd Gen, Node 20, us-central1**.
 | `sendEmail` | HTTPS Callable | Send email via SendGrid |
 | `sendSMS` | HTTPS Callable | Send SMS via BulkSMS (+27 SA format) |
 | `sendWhatsApp` | HTTPS Callable | Send WhatsApp via Twilio |
-| `transcribeConsultation` | HTTPS Callable | Upload audio → AssemblyAI → return transcript |
+| `transcribeConsultation` | HTTPS Callable | Upload audio → Google Cloud Speech-to-Text → return transcript |
 | `sendActivationEmail` | HTTPS Callable | Email user when Super Admin activates their account |
+| `deleteUserAccount` | HTTPS Callable | Deletes Firebase Auth account + Firestore doc (super admin only) |
 | `notifyOnUserCreated` | Firestore `users/{userId}` onCreate | Email admin + welcome email to new registrant |
 
 Callable usage from React:
@@ -259,11 +256,23 @@ admin.auth().setCustomUserClaims('<admin-uid>', { isAdmin: true })
 
 ## 12. Pricing Plans
 
-| Plan | Price | Messages/month | Key features |
-|---|---|---|---|
-| **Starter** | R699/mo | 100 | Campaigns, business management |
-| **Business** | R2,699/mo | 50,000 | + IVR, Surveys, WhatsApp |
-| **Enterprise** | R4,999/mo | 250,000 | All features + dedicated support |
+Message quota applies to **campaigns only** (SMS + email). Booking confirmations, appointment reminders, and operational messages are free and unlimited.
+
+Internal plan keys are stable (`starter` / `business` / `enterprise`) to avoid breaking existing Firestore user docs. Display names changed in v2.
+
+| Internal key | Display name | Price | Campaign messages/mo | Ideal for |
+|---|---|---|---|---|
+| `starter` | **Starter** | R699/mo | 1,000 | All industries |
+| `business` | **Professional** | R2,699/mo | 3,000 | Medical practices & doctors |
+| `enterprise` | **Business** | R4,999/mo | 10,000 | B2B companies & property managers |
+
+**Cost basis (SA market, conservative estimates):**
+- BulkSMS: ~R0.30/SMS
+- SendGrid: ~R0.007/email
+- Assumed campaign mix: 60% email / 40% SMS
+- Firebase/GCP infra: R30–80/user/month
+- GCP Speech-to-Text (medical): ~R200/user/month
+- Gross margin per plan: ~79–81%
 
 ---
 

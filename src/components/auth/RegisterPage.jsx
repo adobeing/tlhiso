@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -29,7 +29,7 @@ function normalizePhone(p) {
 
 const Stepper = ({ step }) => (
   <div className="mb-6 flex items-center gap-2">
-    {[1, 2, 3, 4].map((n) => (
+    {[1, 2, 3].map((n) => (
       <div key={n}
         className={`h-1.5 flex-1 rounded-full transition ${n <= step ? 'bg-primary' : 'bg-border'}`} />
     ))}
@@ -38,6 +38,7 @@ const Stepper = ({ step }) => (
 
 export default function RegisterPage() {
   const { register: registerUser, setDisplayName } = useAuth()
+  const navigate = useNavigate()
   const [step, setStep] = useState(1)
   const [data, setData] = useState({})
   const [industry, setIndustry] = useState(null)
@@ -77,7 +78,8 @@ export default function RegisterPage() {
         bankingDetails: null,
         createdAt: serverTimestamp(),
       })
-      setStep(4)
+      // Redirect to checkout — user pays to activate their account
+      navigate('/checkout', { replace: true })
     } catch (err) {
       setFormError(friendlyAuthError(err))
       setStep(1)
@@ -88,11 +90,11 @@ export default function RegisterPage() {
 
   return (
     <AuthShell
-      title={step === 4 ? 'Account created' : 'Create your account'}
-      subtitle={step === 4 ? '' : 'Get started with Tlhiso in a few steps.'}
-      footer={step < 4 ? (<>Already have an account? <Link to="/login" className="font-semibold text-primary">Sign in</Link></>) : null}
+      title="Create your account"
+      subtitle="Get started with Tlhiso in a few steps."
+      footer={<>Already have an account? <Link to="/login" className="font-semibold text-primary">Sign in</Link></>}
     >
-      {step < 4 && <Stepper step={step} />}
+      <Stepper step={step} />
       <FormError>{formError}</FormError>
 
       {step === 1 && (
@@ -157,7 +159,8 @@ export default function RegisterPage() {
                   <p className="text-sm font-semibold text-ink">
                     {p.name}{p.popular && <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase text-white">Popular</span>}
                   </p>
-                  <p className="text-xs text-ink-secondary">{p.messages.toLocaleString()} messages / month</p>
+                  <p className="text-xs text-ink-secondary">{p.messages.toLocaleString()} campaign messages / month</p>
+                  {p.idealFor && <p className="text-[11px] text-ink-secondary/70 italic">{p.idealFor}</p>}
                 </div>
                 <p className="text-sm font-bold text-ink">R{p.price.toLocaleString()}<span className="text-xs font-normal text-ink-secondary">/mo</span></p>
               </button>
@@ -171,19 +174,6 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {step === 4 && (
-        <div className="rounded-card border border-primary/30 bg-primary-light p-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-xl text-white">✓</div>
-          <h2 className="text-lg font-bold text-ink">Account Created!</h2>
-          <p className="mt-2 text-sm text-ink-secondary">
-            Your account is pending activation. You’ll receive an email at{' '}
-            <span className="font-semibold text-ink">{data.email}</span> once an admin activates it.
-          </p>
-          <Link to="/login" className="mt-5 inline-block w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
-            Go to sign in
-          </Link>
-        </div>
-      )}
     </AuthShell>
   )
 }

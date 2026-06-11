@@ -4,6 +4,7 @@ import { db } from '../../services/firebase'
 import { useAuth } from '../../contexts/AuthContext'
 import { useCollection } from '../../hooks/useCollection'
 import DataTable from './DataTable'
+import { fmtDate } from '../../utils/dates'
 
 const TABS = ['Consent Register', 'Data Subject Requests', 'POPIA Notice', 'Data Breach Log']
 
@@ -19,10 +20,10 @@ export default function PopiaModule({ subCollection = 'customers' }) {
 
   const consentCols = [
     { key: 'name', label: 'Name' },
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'method', label: 'Method' },
     { key: 'purpose', label: 'Purpose' },
-    { key: 'optOutDate', label: 'Opt-out Date' },
+    { key: 'optOutDate', label: 'Opt-out Date', render: r => fmtDate(r.optOutDate) },
   ]
   const requestCols = [
     { key: 'subject', label: 'Subject' },
@@ -34,10 +35,10 @@ export default function PopiaModule({ subCollection = 'customers' }) {
         'bg-amber-100 text-amber-700'
       }`}>{r.status}</span>
     )},
-    { key: 'deadline', label: 'Deadline (30 days)' },
+    { key: 'deadline', label: 'Deadline (30 days)', render: r => fmtDate(r.deadline) },
   ]
   const breachCols = [
-    { key: 'date', label: 'Date' },
+    { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
     { key: 'nature', label: 'Nature' },
     { key: 'affected', label: 'Affected Parties' },
     { key: 'action', label: 'Action Taken' },
@@ -77,10 +78,14 @@ export default function PopiaModule({ subCollection = 'customers' }) {
 
   return (
     <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-slate-800">POPIA Compliance</h2>
+        <p className="mt-0.5 text-sm text-slate-600">Manage consent, data subject requests, privacy notices and breach records.</p>
+      </div>
       <div className="flex gap-2 flex-wrap">
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${tab === i ? 'bg-primary text-white' : 'border border-border text-ink-secondary hover:border-primary/50'}`}>
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${tab === i ? 'bg-primary text-white' : 'border border-slate-200 text-slate-600 hover:border-primary/50'}`}>
             {t}
           </button>
         ))}
@@ -89,9 +94,9 @@ export default function PopiaModule({ subCollection = 'customers' }) {
       {tab === 0 && <DataTable columns={consentCols} data={consents ?? []} emptyMessage="No consent records yet." />}
       {tab === 1 && <DataTable columns={requestCols} data={requests ?? []} emptyMessage="No data subject requests." />}
       {tab === 2 && (
-        <div className="rounded-card border border-border bg-white p-6 shadow-card space-y-4">
-          <h3 className="font-bold text-ink">POPIA Privacy Notice Generator</h3>
-          <p className="text-sm text-ink-secondary">Generate a customised POPIA notice using your business profile details.</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800">POPIA Privacy Notice Generator</h3>
+          <p className="text-sm text-slate-600">Generate a customised POPIA notice using your business profile details.</p>
           <button onClick={generateNotice}
             className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">
             Download POPIA Notice
@@ -101,11 +106,11 @@ export default function PopiaModule({ subCollection = 'customers' }) {
       {tab === 3 && (
         <div className="space-y-4">
           <DataTable columns={breachCols} data={breaches ?? []} emptyMessage="No breaches logged." />
-          <div className="rounded-card border border-border bg-white p-5 shadow-card">
-            <h3 className="mb-3 font-bold text-ink text-sm">Log a Data Breach</h3>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-3 font-bold text-slate-800 text-sm">Log a Data Breach</h3>
             <textarea value={breachNote} onChange={e => setBreachNote(e.target.value)}
               placeholder="Describe the nature of the breach…"
-              className="w-full rounded-xl border border-border p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 h-24 resize-none" />
+              className="w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 h-24 resize-none" />
             <button onClick={logBreach}
               className="mt-3 rounded-xl bg-red-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-600">
               Log Breach

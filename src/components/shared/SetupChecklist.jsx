@@ -58,62 +58,38 @@ export default function SetupChecklist({ industry }) {
   }
 
   return (
-    <div className="rounded-card border border-primary/20 bg-primary-light shadow-card">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-primary/15 px-5 py-4">
-        <div className="flex items-center gap-2.5">
-          <Rocket size={17} className="flex-shrink-0 text-primary" />
-          <div>
-            <p className="text-sm font-bold text-ink">Getting Started</p>
-            <p className="text-xs text-ink-secondary">{completedCount} of 4 steps complete</p>
-          </div>
-        </div>
-        <button
-          onClick={dismiss}
-          title="Dismiss"
-          className="rounded-lg p-1 text-ink-secondary transition hover:bg-primary/10 hover:text-ink"
-        >
-          <X size={15} />
-        </button>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-primary/20 bg-primary-light/60 px-4 py-2.5">
+      {/* Label + progress */}
+      <div className="flex shrink-0 items-center gap-2">
+        <Rocket size={13} className="text-primary" />
+        <span className="text-xs font-bold text-ink">Getting Started</span>
+        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+          {completedCount}/4
+        </span>
       </div>
 
-      {/* Progress bar */}
-      <div className="px-5 pt-3.5">
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-primary/10">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-500"
-            style={{ width: `${(completedCount / 4) * 100}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Steps grid */}
-      <div className="grid gap-2 p-5 sm:grid-cols-2">
+      {/* Steps */}
+      <div className="flex flex-1 flex-wrap gap-1.5">
         {steps.map((step, i) => {
           const isDone = done[i]
-          return (
-            <Link
-              key={step.to}
-              to={step.to}
-              onClick={isDone ? (e) => e.preventDefault() : undefined}
-              className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition ${
-                isDone
-                  ? 'cursor-default border-green-200 bg-green-50'
-                  : 'border-primary/20 bg-white hover:border-primary hover:shadow-sm'
-              }`}
-            >
-              {isDone
-                ? <CheckCircle2 size={17} className="flex-shrink-0 text-green-500" />
-                : <Circle size={17} className="flex-shrink-0 text-primary/40" />
-              }
-              <span className={isDone ? 'text-green-700 line-through' : 'font-medium text-ink'}>
-                {step.label}
-              </span>
-              {!isDone && <ChevronRight size={14} className="ml-auto flex-shrink-0 text-ink-secondary" />}
+          return isDone ? (
+            <span key={step.to} className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-[11px] font-semibold text-green-700">
+              <CheckCircle2 size={10} /> {step.label}
+            </span>
+          ) : (
+            <Link key={step.to} to={step.to}
+              className="flex items-center gap-1 rounded-full border border-primary/25 bg-white px-2.5 py-0.5 text-[11px] font-medium text-primary transition hover:border-primary hover:bg-white/80">
+              <Circle size={10} className="text-primary/40" /> {step.label}
             </Link>
           )
         })}
       </div>
+
+      {/* Dismiss */}
+      <button onClick={dismiss} title="Dismiss"
+        className="shrink-0 rounded-lg p-1 text-ink-secondary/60 transition hover:text-ink-secondary">
+        <X size={13} />
+      </button>
     </div>
   )
 }

@@ -30,8 +30,9 @@ const storage = admin.storage()
 // ── Config (set via: firebase functions:secrets:set KEY) ─────────────────────
 const getConfig = () => ({
   sendgridKey: process.env.SENDGRID_API_KEY,
-  sendgridFrom: process.env.SENDGRID_FROM_EMAIL || 'hello@tlhiso.com',
+  sendgridFrom: process.env.SENDGRID_FROM_EMAIL || 'hello@notifications.tlhiso.com',
   sendgridFromName: process.env.SENDGRID_FROM_NAME || 'Tlhiso',
+  sendgridReplyTo: 'hello@tlhiso.com',
   bulksmsTokenId: process.env.BULKSMS_TOKEN_ID,
   bulksmsTokenSecret: process.env.BULKSMS_TOKEN_SECRET,
   twilioSid: process.env.TWILIO_ACCOUNT_SID,
@@ -51,11 +52,22 @@ exports.sendEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (req) => {
   const cfg = getConfig()
   sgMail.setApiKey(cfg.sendgridKey)
   try {
+    const plainText = htmlBody
+      .replace(/<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, '$2 ($1)')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s{2,}/g, '\n')
+      .trim()
     const msg = {
       to,
       from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+      replyTo: cfg.sendgridReplyTo,
       subject: subject || '(no subject)',
       html: htmlBody,
+      text: plainText,
+      headers: {
+        'List-Unsubscribe': `<mailto:${cfg.sendgridReplyTo}?subject=unsubscribe>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
     }
     if (templateId) msg.templateId = templateId
     if (Array.isArray(attachments) && attachments.length) {
@@ -121,6 +133,124 @@ exports.sendWhatsApp = onCall({
     console.error('sendWhatsApp error', e.message)
     return { success: false, error: e.message }
   }
+})
+
+// ── helpers for email tracking (used by scheduler + HTTP functions) ───────────
+
+// Converts plain-text campaign body to a basic HTML email shell.
+// HTML-mode bodies are returned as-is.
+function resolveScheduledEmailBody(rawBody, emailMode) {
+  if (emailMode === 'html') return rawBody
+  const paragraphs = rawBody
+    .split(/\n{2,}/)
+    .map(p => `<p style="margin:0 0 16px;line-height:1.6">${p.replace(/\n/g, '<br>')}</p>`)
+    .join('')
+  return `<div style="font-family:sans-serif;color:#333;max-width:600px;padding:16px">${paragraphs}</div>`
+}
+
+// Injects a 1×1 tracking pixel and (for HTML-mode emails) wraps every link
+// through the /track/click redirect endpoint.
+function injectCampaignTracking(html, uid, campaignId, contactId, emailMode) {
+  const BASE = 'https://tlhiso.com'
+  const r    = encodeURIComponent(String(contactId || 'unknown'))
+  const pixel = `<img src="${BASE}/track/open?u=${uid}&c=${campaignId}&r=${r}" width="1" height="1" style="display:none;border:0" alt="">`
+
+  let result = (emailMode === 'html')
+    ? html.replace(/href="(https?:\/\/[^"]*?)"/gi, (_, href) => {
+        if (href.includes('/track/')) return `href="${href}"`
+        return `href="${BASE}/track/click?u=${uid}&c=${campaignId}&r=${r}&url=${encodeURIComponent(href)}"`
+      })
+    : html
+
+  return result.includes('</body>')
+    ? result.replace('</body>', `${pixel}</body>`)
+    : result + pixel
+}
+
+// ── 4a. trackOpen (HTTP — serves 1×1 GIF, records open event) ─────────────────
+exports.trackOpen = onRequest({ cors: true }, async (req, res) => {
+  const { u: uid, c: campaignId, r: contactId } = req.query
+
+  if (uid && campaignId) {
+    const safeId  = String(contactId || 'unknown').slice(0, 128)
+    const campRef = db.doc(`users/${uid}/campaigns/${campaignId}`)
+    try {
+      const openRef = campRef.collection('opens').doc(safeId)
+      const openDoc = await openRef.get()
+      if (!openDoc.exists) {
+        await Promise.all([
+          campRef.update({
+            openCount:       admin.firestore.FieldValue.increment(1),
+            uniqueOpenCount: admin.firestore.FieldValue.increment(1),
+          }),
+          openRef.set({
+            firstOpened: admin.firestore.Timestamp.now(),
+            lastOpened:  admin.firestore.Timestamp.now(),
+            count: 1,
+          }),
+        ])
+      } else {
+        await Promise.all([
+          campRef.update({ openCount: admin.firestore.FieldValue.increment(1) }),
+          openRef.update({
+            lastOpened: admin.firestore.Timestamp.now(),
+            count: admin.firestore.FieldValue.increment(1),
+          }),
+        ])
+      }
+    } catch (e) {
+      console.error('trackOpen error', e.message)
+    }
+  }
+
+  const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+  res.set('Content-Type',  'image/gif')
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+  res.set('Pragma', 'no-cache')
+  res.end(gif)
+})
+
+// ── 4b. trackClick (HTTP — records click, redirects to target URL) ─────────────
+exports.trackClick = onRequest({ cors: false }, async (req, res) => {
+  const { u: uid, c: campaignId, r: contactId, url } = req.query
+  const raw       = url ? decodeURIComponent(String(url)) : ''
+  const targetUrl = /^https?:\/\//i.test(raw) ? raw : 'https://tlhiso.com'
+
+  if (uid && campaignId) {
+    const safeId  = String(contactId || 'unknown').slice(0, 128)
+    const campRef = db.doc(`users/${uid}/campaigns/${campaignId}`)
+    try {
+      const clickRef = campRef.collection('clicks').doc(safeId)
+      const clickDoc = await clickRef.get()
+      if (!clickDoc.exists) {
+        await Promise.all([
+          campRef.update({
+            clickCount:       admin.firestore.FieldValue.increment(1),
+            uniqueClickCount: admin.firestore.FieldValue.increment(1),
+          }),
+          clickRef.set({
+            firstClicked: admin.firestore.Timestamp.now(),
+            lastClicked:  admin.firestore.Timestamp.now(),
+            count: 1,
+            urls: [targetUrl],
+          }),
+        ])
+      } else {
+        await Promise.all([
+          campRef.update({ clickCount: admin.firestore.FieldValue.increment(1) }),
+          clickRef.update({
+            lastClicked: admin.firestore.Timestamp.now(),
+            count: admin.firestore.FieldValue.increment(1),
+            urls: admin.firestore.FieldValue.arrayUnion(targetUrl),
+          }),
+        ])
+      }
+    } catch (e) {
+      console.error('trackClick error', e.message)
+    }
+  }
+
+  res.redirect(302, targetUrl)
 })
 
 // ── 4. transcribeConsultation ─────────────────────────────────────────────────
@@ -378,12 +508,14 @@ exports.processScheduledCampaigns = onSchedule(
 
           try {
             if (channel === 'email') {
+              const emailHtml = resolveScheduledEmailBody(msgBody, camp.emailMode)
+              const tracked   = injectCampaignTracking(emailHtml, uid, campDoc.id, contact.id, camp.emailMode)
               sgMail.setApiKey(cfg.sendgridKey)
               await sgMail.send({
                 to:      contact.email,
                 from:    { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
                 subject: camp.subject || 'Message from your service',
-                html:    msgBody,
+                html:    tracked,
               })
             } else if (channel === 'sms') {
               const to = normPhone(contact.phone)
@@ -402,16 +534,16 @@ exports.processScheduledCampaigns = onSchedule(
               })
             }
             sent++
-          // Log success to the user's messages subcollection
-          await db.collection(`users/${uid}/messages`).add({
-            to:         channel === 'email' ? contact.email : normPhone(contact.phone),
-            type:       channel,
-            body:       msgBody,
-            status:     'sent',
-            module:     'campaigns',
-            campaignId: campDoc.id,
-            sentAt:     admin.firestore.Timestamp.now(),
-          }).catch(e => console.error('[scheduler] message log failed:', e.message))
+            // Log success to the user's messages subcollection
+            db.collection(`users/${uid}/messages`).add({
+              to:         channel === 'email' ? contact.email : normPhone(contact.phone),
+              type:       channel,
+              body:       msgBody,
+              status:     'sent',
+              module:     'campaigns',
+              campaignId: campDoc.id,
+              sentAt:     admin.firestore.Timestamp.now(),
+            }).catch(e => console.error('[scheduler] message log failed:', e.message))
           } catch (err) {
             console.error(`[scheduler] send failed for contact ${contact.id}:`, err.message)
             failed++
@@ -661,3 +793,298 @@ exports.payfastIPN = onRequest({
 
   res.status(200).send('OK')
 })
+
+// ── 11. unsubscribeContact ────────────────────────────────────────────────────
+// Decodes a base64 token containing { uid, col, id } and sets
+// marketingOptOut: true on the contact document. No auth required — the
+// contact ID itself is a random Firestore auto-ID which acts as the secret.
+const ALLOWED_CONTACT_COLS = new Set(['customers', 'patients', 'tenants'])
+exports.unsubscribeContact = onCall({ cors: true }, async (req) => {
+  const { token } = req.data
+  if (!token || typeof token !== 'string') throw new HttpsError('invalid-argument', 'Token required')
+
+  let uid, col, id
+  try {
+    const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'))
+    uid = decoded.uid; col = decoded.col; id = decoded.id
+  } catch {
+    throw new HttpsError('invalid-argument', 'Invalid token')
+  }
+
+  if (!uid || !col || !id) throw new HttpsError('invalid-argument', 'Incomplete token')
+  if (!ALLOWED_CONTACT_COLS.has(col)) throw new HttpsError('invalid-argument', 'Unknown collection')
+
+  try {
+    await db.doc(`users/${uid}/${col}/${id}`).update({ marketingOptOut: true })
+    return { success: true }
+  } catch (e) {
+    throw new HttpsError('internal', 'Could not update contact')
+  }
+})
+
+// ── smsDeliveryWebhook ────────────────────────────────────────────────────────
+// BulkSMS POSTs delivery receipts here. Must return 200 quickly or BulkSMS
+// retries and eventually stops sending. We log receipts to sms_delivery_logs
+// for visibility but never let a log failure block the 200 response.
+exports.smsDeliveryWebhook = onRequest({ cors: false }, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
+
+  try {
+    const receipts = Array.isArray(req.body) ? req.body : (req.body ? [req.body] : [])
+    if (receipts.length > 0) {
+      const batch = db.batch()
+      for (const receipt of receipts) {
+        batch.set(db.collection('sms_delivery_logs').doc(), {
+          messageId:  receipt.id        ?? null,
+          to:         receipt.to        ?? null,
+          statusType: receipt.status?.type ?? null,
+          statusId:   receipt.status?.id   ?? null,
+          eventType:  receipt.type      ?? null,
+          body:       receipt.body      ?? null,
+          creditCost: receipt.creditCost ?? null,
+          parts:      receipt.numberOfParts ?? null,
+          submittedAt: receipt.submission?.date ?? null,
+          receivedAt: admin.firestore.Timestamp.now(),
+        })
+      }
+      await batch.commit()
+    }
+  } catch (e) {
+    console.error('smsDeliveryWebhook log error', e.message)
+  }
+
+  res.status(200).send('OK')
+})
+
+exports.shortenUrl = onCall({ cors: true }, async (req) => {
+  const { url } = req.data
+  if (!url) throw new HttpsError('invalid-argument', 'URL is required')
+  try {
+    const resp = await axios.get(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`)
+    const short = String(resp.data || '').trim()
+    if (!short.startsWith('http')) throw new Error('Unexpected response from is.gd')
+    return { shortUrl: short }
+  } catch (e) {
+    throw new HttpsError('internal', 'Could not shorten URL')
+  }
+})
+
+// ── 10. processAutomations (runs every 60 minutes) ────────────────────────────
+// For each active automation, finds contacts that match the trigger + delay
+// window and sends them the configured message (SMS / Email / WhatsApp).
+// Tracks sent contacts in /users/{uid}/automations/{aid}/runs/{contactId}
+// to prevent duplicate sends.
+exports.processAutomations = onSchedule(
+  {
+    schedule: 'every 60 minutes',
+    secrets: [
+      'SENDGRID_API_KEY',
+      'BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET',
+      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_WHATSAPP_NUMBER',
+    ],
+  },
+  async () => {
+    const now = new Date()
+    const cfg = getConfig()
+    const WINDOW_MS = 70 * 60 * 1000 // 70-min window to absorb scheduler jitter
+
+    // All active automations across all users
+    const autoSnap = await db.collectionGroup('automations')
+      .where('active', '==', true)
+      .get()
+
+    if (autoSnap.empty) return
+    console.log(`[automations] ${autoSnap.size} active automation(s)`)
+
+    for (const autoDoc of autoSnap.docs) {
+      const auto = autoDoc.data()
+      const uid  = autoDoc.ref.parent.parent?.id
+      if (!uid) continue
+
+      const contactCol = CONTACT_COLLECTION[auto.industry] ?? 'customers'
+
+      try {
+        // Load user plan for quota check
+        const userSnap  = await db.doc(`users/${uid}`).get()
+        const userData  = userSnap.data() ?? {}
+        const planKey   = userData.plan ?? 'starter'
+        const limit     = PLAN_LIMITS[planKey] ?? 1000
+        const used      = userData.messagesUsed ?? 0
+        if (used >= limit) {
+          console.log(`[automations] uid=${uid} quota exhausted, skipping`)
+          continue
+        }
+        let quota = limit - used
+
+        // Contacts already sent this automation
+        const runsSnap  = await db.collection(`users/${uid}/automations/${autoDoc.id}/runs`).get()
+        const alreadyRun = new Set(runsSnap.docs.map(d => d.id))
+
+        // All contacts for this user/industry
+        const contactSnap = await db.collection(`users/${uid}/${contactCol}`).get()
+        const contacts    = contactSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+        const candidates = []
+
+        for (const contact of contacts) {
+          if (contact.marketingOptOut) continue
+          // Channel reachability check
+          if (auto.channel === 'email' && !contact.email) continue
+          if ((auto.channel === 'sms' || auto.channel === 'whatsapp') && !contact.phone) continue
+
+          let matches = false
+
+          switch (auto.trigger) {
+            case 'new_contact': {
+              if (alreadyRun.has(contact.id)) break // only once per contact
+              const created = contact.createdAt?.toDate?.()
+              if (!created) break
+              const delayMs = (auto.delay ?? 0) * 60 * 1000
+              const target  = new Date(created.getTime() + delayMs)
+              if (Math.abs(now - target) <= WINDOW_MS) matches = true
+              break
+            }
+
+            case 'appointment_booked': {
+              if (alreadyRun.has(contact.id)) break
+              // Find the most recent appointment linked to this contact
+              const nameKey = auto.industry === 'medical' ? 'patient' : 'customer'
+              const contactName = getContactName(contact, auto.industry)
+              const apptSnap = await db.collection(`users/${uid}/appointments`)
+                .where(nameKey, '==', contactName)
+                .orderBy('createdAt', 'desc')
+                .limit(1)
+                .get()
+              if (apptSnap.empty) break
+              const apptCreated = apptSnap.docs[0].data().createdAt?.toDate?.()
+              if (!apptCreated) break
+              const delayMs = (auto.delay ?? 0) * 60 * 1000
+              const target  = new Date(apptCreated.getTime() + delayMs)
+              if (Math.abs(now - target) <= WINDOW_MS) matches = true
+              break
+            }
+
+            case 'birthday': {
+              // auto.delay: 0 = on the day, -60 = 1 day before (stored as minutes before)
+              const dobRaw = contact.dateOfBirth || contact.birthDate
+              if (!dobRaw) break
+              const dob = typeof dobRaw === 'string' ? new Date(dobRaw) : dobRaw.toDate?.()
+              if (!dob || isNaN(dob)) break
+              const target = new Date(now)
+              if (auto.delay < 0) target.setMinutes(target.getMinutes() + Math.abs(auto.delay))
+              if (dob.getDate() !== target.getDate() || dob.getMonth() !== target.getMonth()) break
+              // Only send once per year — check if last run was in a previous year
+              const lastRun = runsSnap.docs.find(d => d.id === contact.id)?.data()?.sentAt?.toDate?.()
+              if (lastRun && lastRun.getFullYear() >= now.getFullYear()) break
+              matches = true
+              break
+            }
+
+            case 'inactive': {
+              if (alreadyRun.has(contact.id)) break
+              // auto.delay is in days for this trigger
+              const inactiveDays = auto.delay ?? 30
+              const cutoff = new Date(now.getTime() - inactiveDays * 24 * 60 * 60 * 1000)
+              // Check most recent message to this contact
+              const toValues = [contact.phone ? normPhone(contact.phone) : null, contact.email].filter(Boolean)
+              let lastContact = null
+              for (const toVal of toValues) {
+                const msgSnap = await db.collection(`users/${uid}/messages`)
+                  .where('to', '==', toVal)
+                  .orderBy('sentAt', 'desc')
+                  .limit(1)
+                  .get()
+                if (!msgSnap.empty) {
+                  const d = msgSnap.docs[0].data().sentAt?.toDate?.()
+                  if (d && (!lastContact || d > lastContact)) lastContact = d
+                }
+              }
+              // If never messaged, use contact creation date as proxy
+              if (!lastContact) {
+                const created = contact.createdAt?.toDate?.()
+                lastContact = created ?? new Date(0)
+              }
+              if (lastContact < cutoff) matches = true
+              break
+            }
+          }
+
+          if (matches) candidates.push(contact)
+        }
+
+        if (candidates.length === 0) continue
+        const toSend = candidates.slice(0, quota)
+        console.log(`[automations] auto=${autoDoc.id} trigger=${auto.trigger} sending=${toSend.length}`)
+
+        let sent = 0
+        for (const contact of toSend) {
+          const name = getContactName(contact, auto.industry)
+          const resolved = (auto.body ?? '')
+            .replace(/\{name\}/gi,    name)
+            .replace(/\{email\}/gi,   contact.email  ?? '')
+            .replace(/\{phone\}/gi,   contact.phone  ?? '')
+            .replace(/\{company\}/gi, contact.company ?? '')
+
+          try {
+            if (auto.channel === 'email') {
+              const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333;padding:24px;max-width:600px;margin:0 auto">${resolved.replace(/\n/g, '<br>')}</body></html>`
+              sgMail.setApiKey(cfg.sendgridKey)
+              await sgMail.send({
+                to:      contact.email,
+                from:    { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+                subject: auto.subject || 'Message from your service',
+                html,
+              })
+            } else if (auto.channel === 'sms') {
+              await axios.post(
+                'https://api.bulksms.com/v1/messages',
+                [{ to: normPhone(contact.phone), body: resolved }],
+                { auth: { username: cfg.bulksmsTokenId, password: cfg.bulksmsTokenSecret } }
+              )
+            } else if (auto.channel === 'whatsapp') {
+              const client = twilio(cfg.twilioSid, cfg.twilioToken)
+              await client.messages.create({
+                from: cfg.twilioWhatsapp,
+                to:   `whatsapp:${normPhone(contact.phone)}`,
+                body: resolved,
+              })
+            }
+
+            sent++
+            const to = auto.channel === 'email' ? contact.email : normPhone(contact.phone)
+
+            // Log to messages subcollection
+            db.collection(`users/${uid}/messages`).add({
+              to, type: auto.channel, body: resolved,
+              status: 'sent', module: 'automations',
+              automationId: autoDoc.id, sentAt: admin.firestore.Timestamp.now(),
+            }).catch(() => {})
+
+            // Mark this contact as run for this automation
+            await db.doc(`users/${uid}/automations/${autoDoc.id}/runs/${contact.id}`).set({
+              sentAt: admin.firestore.Timestamp.now(), channel: auto.channel, to,
+            })
+          } catch (e) {
+            console.error(`[automations] send failed contact=${contact.id}:`, e.message)
+          }
+        }
+
+        if (sent > 0) {
+          await Promise.all([
+            db.doc(`users/${uid}/automations/${autoDoc.id}`).update({
+              runCount: admin.firestore.FieldValue.increment(sent),
+              lastRunAt: admin.firestore.Timestamp.now(),
+            }),
+            db.doc(`users/${uid}`).update({
+              messagesUsed: admin.firestore.FieldValue.increment(sent),
+            }),
+          ])
+        }
+
+        console.log(`[automations] auto=${autoDoc.id} sent=${sent}`)
+      } catch (e) {
+        console.error(`[automations] error processing auto=${autoDoc.id}:`, e.message)
+      }
+    }
+  }
+)

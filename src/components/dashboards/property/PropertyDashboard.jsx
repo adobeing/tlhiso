@@ -8,6 +8,7 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
+import CampaignSnapshot from '../../shared/CampaignSnapshot'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
@@ -18,6 +19,8 @@ import {
   MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon, Receipt, Mail,
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
+import AutomationsModule from '../../shared/AutomationsModule'
+import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
@@ -95,10 +98,10 @@ async function downloadStatementPDF(data) {
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
 function Field({ label, error, textarea, select, children, ...props }) {
-  const cls = 'w-full rounded-xl border border-border px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+  const cls = 'w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20'
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
       {textarea ? <textarea {...props} className={cls + ' resize-none h-24'} /> :
        select ? <select {...props} className={cls}>{children}</select> :
        <input {...props} className={cls} />}
@@ -111,8 +114,8 @@ function PageHead({ title, subtitle, action }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 className="text-lg font-bold text-ink">{title}</h2>
-        {subtitle && <p className="mt-0.5 text-sm text-ink-secondary">{subtitle}</p>}
+        <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+        {subtitle && <p className="mt-0.5 text-sm text-slate-600">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -130,11 +133,11 @@ function AddButton({ onClick, children }) {
 
 function SectionCard({ icon: Icon, title, action, children }) {
   return (
-    <div className="rounded-card border border-border bg-white shadow-card">
-      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-card">
+      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
         <div className="flex items-center gap-2">
-          {Icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-light text-primary"><Icon size={14} /></span>}
-          <h3 className="text-sm font-bold text-ink">{title}</h3>
+          {Icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><Icon size={14} /></span>}
+          <h3 className="text-sm font-bold text-slate-800">{title}</h3>
         </div>
         {action}
       </div>
@@ -146,8 +149,8 @@ function SectionCard({ icon: Icon, title, action, children }) {
 function EmptyState({ icon: Icon, message }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-      {Icon && <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-secondary"><Icon size={20} /></span>}
-      <p className="text-sm text-ink-secondary">{message}</p>
+      {Icon && <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-600"><Icon size={20} /></span>}
+      <p className="text-sm text-slate-600">{message}</p>
     </div>
   )
 }
@@ -156,19 +159,31 @@ function EmptyState({ icon: Icon, message }) {
 function Overview() {
   const { user, profile } = useAuth()
   const uid = user?.uid
-  const properties = useCollection(uid ? `users/${uid}/properties` : null)
-  const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
-  const maintenance = useCollection(uid ? `users/${uid}/maintenance` : null)
-  const rentRoll = useCollection(uid ? `users/${uid}/rentRoll` : null)
+  const properties  = useCollection(uid ? `users/${uid}/properties`  : null)
+  const tenants     = useCollection(uid ? `users/${uid}/tenants`      : null)
+  const maintenance = useCollection(uid ? `users/${uid}/maintenance`  : null)
 
-  const now = new Date()
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const currentRR = rentRoll.filter(r => r.month === thisMonth)
-  const paid = currentRR.filter(r => r.status === 'Paid').length
-  const arrears = currentRR.filter(r => r.status === 'Arrears').length
-  const activeTenants = tenants.filter(t => t.status === 'Active').length
-  const openMaintenance = maintenance.filter(m => m.status === 'Open').length
-  const totalRent = tenants.filter(t => t.status === 'Active').reduce((s, t) => s + Number(t.rentAmount ?? 0), 0)
+  const activeTenants    = useMemo(() => tenants.filter(t => t.status === 'Active'), [tenants])
+  const tenantsInArrears = useMemo(() => tenants.filter(t => t.status === 'Arrears' || t.status === 'Overdue'), [tenants])
+  const openMaintenance  = useMemo(() => maintenance.filter(m => m.status === 'Open'), [maintenance])
+  const totalRent        = useMemo(() => activeTenants.reduce((s, t) => s + Number(t.rentAmount ?? 0), 0), [activeTenants])
+
+  const recentMaintenance = useMemo(() =>
+    [...openMaintenance]
+      .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))
+      .slice(0, 5),
+    [openMaintenance]
+  )
+
+  const expiringLeases = useMemo(() => {
+    const soon = new Date(); soon.setDate(soon.getDate() + 60)
+    const soonStr = soon.toISOString().slice(0, 10)
+    const today = new Date().toISOString().slice(0, 10)
+    return tenants
+      .filter(t => t.leaseEnd && t.leaseEnd >= today && t.leaseEnd <= soonStr)
+      .sort((a, b) => a.leaseEnd.localeCompare(b.leaseEnd))
+      .slice(0, 5)
+  }, [tenants])
 
   return (
     <div className="space-y-6">
@@ -177,31 +192,110 @@ function Overview() {
         title={`Welcome back${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`}
         subtitle="Here's how your portfolio is performing."
       />
+
+      {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Properties" value={properties.length} icon="🏘️" trend={`${tenants.length} tenants total`} trendTone="flat" />
-        <StatCard label="Active Tenants" value={activeTenants} icon="👥" color="blue" trend={currentRR.length ? `${paid} paid · ${arrears} in arrears` : '—'} trendTone={arrears ? 'down' : 'up'} />
+        <StatCard label="Active Tenants" value={activeTenants.length} icon="👥" color="blue"
+          trend={tenantsInArrears.length ? `${tenantsInArrears.length} in arrears` : 'All current'}
+          trendTone={tenantsInArrears.length ? 'down' : 'up'} />
         <StatCard label="Monthly Rent Roll" value={fmt(totalRent)} icon="💰" color="purple" />
-        <StatCard label="Open Maintenance" value={openMaintenance} icon="🔧" color="orange" trend={openMaintenance ? 'Needs attention' : 'All clear'} trendTone={openMaintenance ? 'down' : 'up'} />
+        <StatCard label="Open Maintenance" value={openMaintenance.length} icon="🔧" color="orange"
+          trend={openMaintenance.length ? 'Needs attention' : 'All clear'}
+          trendTone={openMaintenance.length ? 'down' : 'up'} />
       </div>
 
-      <SectionCard icon={MapPin} title="Properties Overview"
-        action={<Link to="/property/properties" className="text-xs font-semibold text-primary hover:underline">View all →</Link>}>
-        {properties.length === 0
-          ? <EmptyState icon={MapPin} message="No properties added yet." />
-          : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {properties.map(p => (
-                <div key={p.id} className="rounded-lg border border-border bg-surface-2 p-4 transition hover:border-primary/40 hover:shadow-card">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-bold text-ink">{p.name}</p>
-                    <span className="rounded-full bg-primary-light px-2 py-0.5 text-[10px] font-semibold text-primary">{p.type}</span>
+      {/* Campaign snapshot */}
+      <CampaignSnapshot industry="property" />
+
+      {/* Properties grid + Alerts side by side */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-800">Properties</h3>
+            <Link to="/property/properties" className="text-xs font-semibold text-primary hover:underline">View all →</Link>
+          </div>
+          {properties.length === 0
+            ? <p className="py-6 text-center text-xs text-slate-400">No properties added yet.</p>
+            : <div className="grid gap-3 sm:grid-cols-2">
+                {properties.slice(0, 4).map(p => (
+                  <div key={p.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-primary/40">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-slate-800">{p.name}</p>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">{p.type}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{p.address}</p>
+                    <p className="mt-2 text-xs font-medium text-slate-700">{p.units} units</p>
                   </div>
-                  <p className="mt-1 text-xs text-ink-secondary">{p.address}</p>
-                  <p className="mt-2 text-xs font-medium text-ink">{p.units} units</p>
+                ))}
+              </div>
+          }
+        </div>
+
+        <div className="space-y-4">
+          {/* Arrears alert */}
+          {tenantsInArrears.length > 0 && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-red-600">Arrears</p>
+              <div className="space-y-1.5">
+                {tenantsInArrears.slice(0, 3).map(t => (
+                  <div key={t.id} className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-800">{t.name}</p>
+                    <span className="text-xs font-bold text-red-600">{fmt(t.rentAmount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Expiring leases */}
+          {expiringLeases.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-amber-700">Leases Expiring Soon</p>
+              <div className="space-y-1.5">
+                {expiringLeases.map(t => (
+                  <div key={t.id} className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-800">{t.name}</p>
+                    <span className="text-xs text-slate-600">{t.leaseEnd}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tenantsInArrears.length === 0 && expiringLeases.length === 0 && (
+            <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-center">
+              <p className="text-xs font-semibold text-green-700">All tenants current — no alerts</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Open maintenance */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-800">Open Maintenance Requests</h3>
+          <Link to="/property/maintenance" className="text-xs font-semibold text-primary hover:underline">View all →</Link>
+        </div>
+        {recentMaintenance.length === 0
+          ? <p className="py-4 text-center text-xs text-slate-400">No open maintenance requests.</p>
+          : <div className="divide-y divide-slate-100">
+              {recentMaintenance.map(m => (
+                <div key={m.id} className="flex items-center justify-between py-2.5">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-800">{m.title || m.description || '—'}</p>
+                    <p className="text-[11px] text-slate-500">{m.property || m.propertyName || '—'} · {m.tenant || m.tenantName || '—'}</p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    m.priority === 'High' || m.priority === 'Urgent' ? 'bg-red-100 text-red-600' :
+                    m.priority === 'Medium' ? 'bg-amber-100 text-amber-700' :
+                    'bg-slate-100 text-slate-600'
+                  }`}>{m.priority || 'Normal'}</span>
                 </div>
               ))}
             </div>
         }
-      </SectionCard>
+      </div>
     </div>
   )
 }
@@ -363,12 +457,12 @@ function Properties() {
             const units = Number(p.units || 0)
             const occupancyPct = units > 0 ? Math.round((occupied / units) * 100) : 0
             return (
-              <div key={p.id} className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md">
+              <div key={p.id} className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
                 {/* Card header */}
-                <div className="flex items-start justify-between gap-2 border-b border-border bg-gradient-to-br from-primary-light/60 to-surface-2 px-5 py-4">
+                <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-gradient-to-br from-primary-light/60 to-surface-2 px-5 py-4">
                   <div className="min-w-0">
-                    <p className="truncate font-bold text-ink">{p.name}</p>
-                    {p.reference && <p className="text-xs text-ink-secondary">{p.reference}</p>}
+                    <p className="truncate font-bold text-slate-800">{p.name}</p>
+                    {p.reference && <p className="text-xs text-slate-600">{p.reference}</p>}
                   </div>
                   <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${PROP_STATUS_COLORS[p.status] ?? 'bg-gray-100 text-gray-600'}`}>
                     {p.status || 'Active'}
@@ -378,7 +472,7 @@ function Properties() {
                 {/* Card body */}
                 <div className="flex flex-1 flex-col gap-3 p-5">
                   {/* Address */}
-                  <div className="flex items-start gap-2 text-sm text-ink-secondary">
+                  <div className="flex items-start gap-2 text-sm text-slate-600">
                     <MapPin size={13} className="mt-0.5 flex-shrink-0 text-primary" />
                     <span>{[p.address, p.suburb, p.city].filter(Boolean).join(', ') || '—'}</span>
                   </div>
@@ -391,17 +485,17 @@ function Properties() {
                       { label: 'Owner', value: p.owner || '—' },
                       { label: 'ERF', value: p.erfNumber || '—' },
                     ].map(({ label, value }) => (
-                      <div key={label} className="rounded-lg bg-surface-2 px-3 py-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
-                        <p className="mt-0.5 text-xs font-semibold text-ink truncate">{value}</p>
+                      <div key={label} className="rounded-lg bg-slate-50 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</p>
+                        <p className="mt-0.5 text-xs font-semibold text-slate-800 truncate">{value}</p>
                       </div>
                     ))}
                   </div>
 
                   {/* Market value */}
                   {p.marketValue && (
-                    <div className="rounded-lg border border-primary/20 bg-primary-light/30 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">Market Value</p>
+                    <div className="rounded-lg border border-primary/20 bg-primary/10/30 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Market Value</p>
                       <p className="text-sm font-bold text-primary">{fmt(p.marketValue)}</p>
                     </div>
                   )}
@@ -410,10 +504,10 @@ function Properties() {
                   {units > 0 && (
                     <div>
                       <div className="mb-1 flex justify-between text-[11px]">
-                        <span className="font-semibold text-ink-secondary">Occupancy</span>
-                        <span className="font-semibold text-ink">{occupied}/{units} units</span>
+                        <span className="font-semibold text-slate-600">Occupancy</span>
+                        <span className="font-semibold text-slate-800">{occupied}/{units} units</span>
                       </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-50">
                         <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${occupancyPct}%` }} />
                       </div>
                     </div>
@@ -421,11 +515,11 @@ function Properties() {
                 </div>
 
                 {/* Card actions */}
-                <div className="flex items-center gap-1 border-t border-border px-4 py-2.5">
-                  <button onClick={() => setViewing(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 transition">
+                <div className="flex items-center gap-1 border-t border-slate-200 px-4 py-2.5">
+                  <button onClick={() => setViewing(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition">
                     <Eye size={12} /> View
                   </button>
-                  <button onClick={() => openEdit(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                  <button onClick={() => openEdit(p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition">
                     <Pencil size={12} /> Edit
                   </button>
                   <button onClick={() => { if (!window.confirm('Delete this property? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'properties', p.id)) }}
@@ -460,11 +554,11 @@ function Properties() {
         {viewing && (
           <div className="space-y-5 text-sm">
             {/* Header */}
-            <div className="flex items-start justify-between gap-3 rounded-xl bg-primary-light/40 px-4 py-4">
+            <div className="flex items-start justify-between gap-3 rounded-xl bg-primary/10/40 px-4 py-4">
               <div>
-                <p className="text-base font-bold text-ink">{viewing.name}</p>
-                {viewing.reference && <p className="text-xs text-ink-secondary mt-0.5">Ref: {viewing.reference}</p>}
-                <p className="mt-1 text-xs text-ink-secondary">{[viewing.address, viewing.suburb, viewing.city, viewing.province].filter(Boolean).join(', ')}</p>
+                <p className="text-base font-bold text-slate-800">{viewing.name}</p>
+                {viewing.reference && <p className="text-xs text-slate-600 mt-0.5">Ref: {viewing.reference}</p>}
+                <p className="mt-1 text-xs text-slate-600">{[viewing.address, viewing.suburb, viewing.city, viewing.province].filter(Boolean).join(', ')}</p>
               </div>
               <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${PROP_STATUS_COLORS[viewing.status] ?? 'bg-gray-100 text-gray-600'}`}>{viewing.status}</span>
             </div>
@@ -499,9 +593,9 @@ function Properties() {
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">{section.title}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {visible.map(({ label, value }) => (
-                      <div key={label} className="rounded-xl bg-surface-2 px-4 py-2.5">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
-                        <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                      <div key={label} className="rounded-xl bg-slate-50 px-4 py-2.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</p>
+                        <p className="mt-0.5 text-sm font-medium text-slate-800">{value}</p>
                       </div>
                     ))}
                   </div>
@@ -512,12 +606,12 @@ function Properties() {
             {viewing.description && (
               <div>
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Description</p>
-                <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink leading-relaxed">{viewing.description}</p>
+                <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-800 leading-relaxed">{viewing.description}</p>
               </div>
             )}
 
             <button onClick={() => { setViewing(null); openEdit(viewing) }}
-              className="w-full rounded-xl border border-primary px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary-light transition">
+              className="w-full rounded-xl border border-primary px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/10 transition">
               Edit this property
             </button>
           </div>
@@ -703,8 +797,8 @@ function TenantFormFields({ f, setF, properties, docFile, setDocFile }) {
 
       <SecHead label="Documents & Notes" />
       <div className="col-span-2">
-        <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">Upload Document (Lease agreement, ID copy, etc.)</span>
-        <input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} className="text-sm text-ink-secondary" />
+        <span className="mb-1.5 block text-xs font-semibold text-slate-600">Upload Document (Lease agreement, ID copy, etc.)</span>
+        <input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} className="text-sm text-slate-600" />
       </div>
       <div className="col-span-2"><Field label="Notes / Remarks" textarea value={f.notes} onChange={set('notes')} /></div>
     </div>
@@ -792,27 +886,27 @@ function Tenants() {
   const cols = [
     { key: 'firstName', label: 'Tenant', render: r => (
       <div>
-        <p className="font-semibold text-ink">{r.firstName} {r.lastName}</p>
-        <p className="text-xs text-ink-secondary">{r.idNumber || '—'}</p>
+        <p className="font-semibold text-slate-800">{r.firstName} {r.lastName}</p>
+        <p className="text-xs text-slate-600">{r.idNumber || '—'}</p>
       </div>
     )},
     { key: 'property', label: 'Property / Unit', render: r => (
       <div>
-        <p className="text-sm text-ink">{r.property || '—'}</p>
-        {r.unitNumber && <p className="text-xs text-ink-secondary">Unit {r.unitNumber}</p>}
+        <p className="text-sm text-slate-800">{r.property || '—'}</p>
+        {r.unitNumber && <p className="text-xs text-slate-600">Unit {r.unitNumber}</p>}
       </div>
     )},
     { key: 'rentAmount', label: 'Rent', render: r => (
       <div>
-        <p className="font-semibold text-ink">{fmt(r.rentAmount)}</p>
-        <p className="text-xs text-ink-secondary">{r.paymentMethod || 'EFT'}</p>
+        <p className="font-semibold text-slate-800">{fmt(r.rentAmount)}</p>
+        <p className="text-xs text-slate-600">{r.paymentMethod || 'EFT'}</p>
       </div>
     )},
     { key: 'leaseEnd', label: 'Lease Expiry', render: r => {
       const info = leaseInfo(r)
       return (
         <div>
-          <p className="text-sm text-ink">{r.leaseEnd || '—'}</p>
+          <p className="text-sm text-slate-800">{r.leaseEnd || '—'}</p>
           {info && <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${info.color}`}>{info.label}</span>}
         </div>
       )
@@ -822,10 +916,10 @@ function Tenants() {
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => setViewing(r)} title="View" className="rounded p-1.5 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
-        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1.5 text-primary hover:bg-primary-light"><Pencil size={14} /></button>
+        <button onClick={() => setViewing(r)} title="View" className="rounded p-1.5 text-slate-600 hover:bg-slate-50"><Eye size={14} /></button>
+        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1.5 text-primary hover:bg-primary/10"><Pencil size={14} /></button>
         <button onClick={() => handleDownloadPDF(r)} title="Download PDF" disabled={pdfing === r.id}
-          className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 disabled:opacity-40">
+          className="rounded p-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
           {pdfing === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         </button>
         <button onClick={() => { if (!window.confirm('Delete this tenant? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'tenants', r.id)) }}
@@ -885,9 +979,9 @@ function Tenants() {
                     {(viewing.firstName || '?').charAt(0)}{(viewing.lastName || '').charAt(0)}
                   </div>
                   <div>
-                    <p className="text-base font-bold text-ink">{viewing.firstName} {viewing.lastName}</p>
-                    {viewing.idNumber && <p className="text-xs text-ink-secondary">ID: {viewing.idNumber}</p>}
-                    <p className="text-xs text-ink-secondary mt-0.5">{viewing.property}{viewing.unitNumber ? ` · Unit ${viewing.unitNumber}` : ''}</p>
+                    <p className="text-base font-bold text-slate-800">{viewing.firstName} {viewing.lastName}</p>
+                    {viewing.idNumber && <p className="text-xs text-slate-600">ID: {viewing.idNumber}</p>}
+                    <p className="text-xs text-slate-600 mt-0.5">{viewing.property}{viewing.unitNumber ? ` · Unit ${viewing.unitNumber}` : ''}</p>
                   </div>
                 </div>
                 <span className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[viewing.status] ?? 'bg-gray-100 text-gray-500'}`}>{viewing.status}</span>
@@ -895,15 +989,15 @@ function Tenants() {
 
               {/* Lease progress bar */}
               {leaseStart && leaseEnd && (
-                <div className="rounded-xl border border-border bg-white px-4 py-3">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-ink">Lease Progress</span>
+                    <span className="text-xs font-semibold text-slate-800">Lease Progress</span>
                     {info && <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${info.color}`}>{info.label}</span>}
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-50">
                     <div className={`h-full rounded-full transition-all ${leasePct > 90 ? 'bg-red-500' : leasePct > 70 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${leasePct}%` }} />
                   </div>
-                  <div className="mt-1.5 flex justify-between text-[10px] text-ink-secondary">
+                  <div className="mt-1.5 flex justify-between text-[10px] text-slate-600">
                     <span>{viewing.leaseStart}</span>
                     <span>{viewing.leaseEnd}</span>
                   </div>
@@ -944,9 +1038,9 @@ function Tenants() {
                     <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">{section.title}</p>
                     <div className="grid grid-cols-2 gap-2">
                       {visible.map(({ label, value }) => (
-                        <div key={label} className="rounded-xl bg-surface-2 px-3 py-2.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
-                          <p className="mt-0.5 text-sm font-medium text-ink">{value}</p>
+                        <div key={label} className="rounded-xl bg-slate-50 px-3 py-2.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</p>
+                          <p className="mt-0.5 text-sm font-medium text-slate-800">{value}</p>
                         </div>
                       ))}
                     </div>
@@ -957,26 +1051,26 @@ function Tenants() {
               {viewing.currentAddress && (
                 <div>
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Previous Address</p>
-                  <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-sm text-ink">{viewing.currentAddress}</p>
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-800">{viewing.currentAddress}</p>
                 </div>
               )}
 
               {viewing.notes && (
                 <div>
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary">Notes</p>
-                  <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-sm leading-relaxed text-ink">{viewing.notes}</p>
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-800">{viewing.notes}</p>
                 </div>
               )}
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <button onClick={() => handleDownloadPDF(viewing)} disabled={pdfing === viewing.id}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                  className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 transition">
                   {pdfing === viewing.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   Download PDF
                 </button>
                 <button onClick={() => sendSMS(viewing)} disabled={sending === viewing.id}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-50 transition">
+                  className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 transition">
                   {sending === viewing.id ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
                   Send SMS
                 </button>
@@ -988,7 +1082,7 @@ function Tenants() {
 
               {viewing.documentUrl && (
                 <a href={viewing.documentUrl} target="_blank" rel="noreferrer"
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-primary-light py-2.5 text-xs font-semibold text-primary hover:bg-primary-light transition">
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-primary-light py-2.5 text-xs font-semibold text-primary hover:bg-primary/10 transition">
                   <FileText size={13} /> View Uploaded Document
                 </a>
               )}
@@ -1103,7 +1197,7 @@ function RentRoll() {
     if (a.includes('90')) return 'text-red-600 font-bold'
     if (a.includes('60')) return 'text-orange-500 font-semibold'
     if (a.includes('30')) return 'text-amber-500'
-    return 'text-ink-secondary'
+    return 'text-slate-600'
   }
 
   const statusBadge = s => ({
@@ -1118,7 +1212,7 @@ function RentRoll() {
         action={
           <div className="flex items-center gap-2">
             <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-              className="rounded-xl border border-border px-3 py-2 text-sm outline-none focus:border-primary" />
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" />
           </div>
         }
       />
@@ -1132,10 +1226,10 @@ function RentRoll() {
       </div>
 
       {/* Rent roll table */}
-      <div className="overflow-hidden rounded-card border border-border bg-white shadow-card">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-surface-2 text-xs font-semibold text-ink-secondary">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-600">
               <tr>
                 {['Tenant', 'Property', 'Unit', 'Rent', 'Status', 'Arrears Age', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-3 text-left">{h}</th>
@@ -1144,11 +1238,11 @@ function RentRoll() {
             </thead>
             <tbody className="divide-y divide-border">
               {rows.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-ink-secondary text-sm">No active tenants for this month.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-600 text-sm">No active tenants for this month.</td></tr>
               )}
               {rows.map(row => (
-                <tr key={row.tenantId} className="hover:bg-surface-2/50 transition">
-                  <td className="px-4 py-3 font-medium text-ink">
+                <tr key={row.tenantId} className="hover:bg-slate-50/50 transition">
+                  <td className="px-4 py-3 font-medium text-slate-800">
                     {row.name}
                     {row.isEscalationMonth && (
                       <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
@@ -1156,13 +1250,13 @@ function RentRoll() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-ink-secondary">{row.property}</td>
-                  <td className="px-4 py-3 text-ink-secondary">{row.unit}</td>
-                  <td className="px-4 py-3 font-semibold text-ink">{fmt(row.rentAmount)}</td>
+                  <td className="px-4 py-3 text-slate-600">{row.property}</td>
+                  <td className="px-4 py-3 text-slate-600">{row.unit}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-800">{fmt(row.rentAmount)}</td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge(row.status)}`}>{row.status}</span>
                   </td>
-                  <td className={`px-4 py-3 text-xs ${row.aging ? agingColor(row.aging) : 'text-ink-secondary'}`}>
+                  <td className={`px-4 py-3 text-xs ${row.aging ? agingColor(row.aging) : 'text-slate-600'}`}>
                     {row.aging || (row.status === 'Paid' ? '—' : 'Current')}
                   </td>
                   <td className="px-4 py-3">
@@ -1198,7 +1292,7 @@ function RentRoll() {
       <Modal open={!!payModal} onClose={() => setPayModal(null)} title="Record Payment">
         {payModal && (
           <div className="space-y-4">
-            <p className="text-sm text-ink">Recording payment for <strong>{payModal.name}</strong> — {fmt(payModal.rentAmount)}</p>
+            <p className="text-sm text-slate-800">Recording payment for <strong>{payModal.name}</strong> — {fmt(payModal.rentAmount)}</p>
             <Field label="Payment Date" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
             <button onClick={() => recordPayment(payModal)} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white">Confirm Payment</button>
           </div>
@@ -1254,7 +1348,7 @@ function OwnerStatements() {
     { key: 'netPayout', label: 'Net Payout', render: r => <span className="font-semibold text-primary">{fmt(r.netPayout)}</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
       <button onClick={e => { e.stopPropagation(); downloadStatementPDF({ ...r, businessName: profile?.businessName || profile?.name || 'Tlhiso Property', businessLogoUrl: profile?.businessLogoUrl || '', generatedAt: new Date().toLocaleDateString('en-ZA') }) }}
-        className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light">
+        className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10">
         <Download size={12} /> PDF
       </button>
     )},
@@ -1264,8 +1358,8 @@ function OwnerStatements() {
     <div className="space-y-6">
       <PageHead title="Owner Statements" subtitle="Generate rent statements & payout summaries for property owners" />
 
-      <div className="rounded-card border border-border bg-white shadow-card p-5">
-        <h3 className="text-sm font-bold text-ink mb-4">Generate New Statement</h3>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
+        <h3 className="text-sm font-bold text-slate-800 mb-4">Generate New Statement</h3>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Property *" select value={form.propertyId} onChange={e => setForm(f=>({...f,propertyId:e.target.value}))}>
             <option value="">Select property…</option>
@@ -1282,12 +1376,12 @@ function OwnerStatements() {
         </div>
 
         {form.rentCollected && (
-          <div className="mt-4 rounded-xl bg-surface-2 p-4 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-ink-secondary">Rent Collected</span><span className="font-semibold">{fmt(rentCollected)}</span></div>
-            <div className="flex justify-between"><span className="text-ink-secondary">Commission ({commission}%)</span><span className="text-red-500">({fmt(commissionAmt)})</span></div>
-            <div className="flex justify-between"><span className="text-ink-secondary">Management Fee</span><span className="text-red-500">({fmt(managementFee)})</span></div>
-            <div className="flex justify-between"><span className="text-ink-secondary">Expenses</span><span className="text-red-500">({fmt(expenses)})</span></div>
-            <div className="flex justify-between border-t border-border pt-2"><span className="font-bold text-ink">Net Payout to Owner</span><span className="font-bold text-primary text-base">{fmt(netPayout)}</span></div>
+          <div className="mt-4 rounded-xl bg-slate-50 p-4 space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-slate-600">Rent Collected</span><span className="font-semibold">{fmt(rentCollected)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-600">Commission ({commission}%)</span><span className="text-red-500">({fmt(commissionAmt)})</span></div>
+            <div className="flex justify-between"><span className="text-slate-600">Management Fee</span><span className="text-red-500">({fmt(managementFee)})</span></div>
+            <div className="flex justify-between"><span className="text-slate-600">Expenses</span><span className="text-red-500">({fmt(expenses)})</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-2"><span className="font-bold text-slate-800">Net Payout to Owner</span><span className="font-bold text-primary text-base">{fmt(netPayout)}</span></div>
           </div>
         )}
 
@@ -1299,7 +1393,7 @@ function OwnerStatements() {
       </div>
 
       <div>
-        <h3 className="text-sm font-bold text-ink mb-3">Statement History</h3>
+        <h3 className="text-sm font-bold text-slate-800 mb-3">Statement History</h3>
         <DataTable columns={cols} data={statements} emptyMessage="No statements generated yet." />
       </div>
     </div>
@@ -1688,7 +1782,7 @@ function PropertyInvoices() {
   const overdue       = invoices.filter(i => i.status === 'Overdue').length
 
   const cols = [
-    { key: 'invoiceNumber', label: 'Invoice #', render: r => <span className="font-mono text-xs font-semibold text-ink">{r.invoiceNumber || '—'}</span> },
+    { key: 'invoiceNumber', label: 'Invoice #', render: r => <span className="font-mono text-xs font-semibold text-slate-800">{r.invoiceNumber || '—'}</span> },
     { key: 'tenantName',    label: 'Tenant'   },
     { key: 'property',      label: 'Property' },
     { key: 'total',         label: 'Amount',   render: r => <span className="font-semibold">{fmt(r.total || 0)}</span> },
@@ -1696,10 +1790,10 @@ function PropertyInvoices() {
     { key: 'status',        label: 'Status',   render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadge(r.status)}`}>{r.status}</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => setViewing(r)} title="View" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Eye size={14} /></button>
-        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1 text-ink-secondary hover:bg-surface-2"><Pencil size={14} /></button>
+        <button onClick={() => setViewing(r)} title="View" className="rounded p-1 text-slate-600 hover:bg-slate-50"><Eye size={14} /></button>
+        <button onClick={() => openEdit(r)} title="Edit" className="rounded p-1 text-slate-600 hover:bg-slate-50"><Pencil size={14} /></button>
         <button onClick={() => handleDownloadPDF(r)} disabled={downloading === r.id} title="Download PDF"
-          className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+          className="rounded p-1 text-primary hover:bg-primary/10 disabled:opacity-50">
           {downloading === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         </button>
         <button onClick={() => { setEmailModal(r); setEmailTo(r.tenantEmail || '') }} title="Email"
@@ -1757,37 +1851,37 @@ function PropertyInvoices() {
           {/* Line items */}
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-semibold text-ink-secondary">Line Items</span>
+              <span className="text-xs font-semibold text-slate-600">Line Items</span>
               <button onClick={() => setForm(f => ({ ...f, items: [...f.items, { desc: '', qty: 1, unitPrice: '' }] }))}
                 className="text-xs font-semibold text-primary hover:underline">+ Add line</button>
             </div>
-            <div className="overflow-hidden rounded-xl border border-border">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
               <table className="w-full text-xs">
-                <thead className="bg-surface-2">
+                <thead className="bg-slate-50">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-ink-secondary">Description</th>
-                    <th className="w-16 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Qty</th>
-                    <th className="w-28 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Unit Price</th>
-                    <th className="w-24 px-2 py-2 text-right text-xs font-semibold text-ink-secondary">Amount</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Description</th>
+                    <th className="w-16 px-2 py-2 text-right text-xs font-semibold text-slate-600">Qty</th>
+                    <th className="w-28 px-2 py-2 text-right text-xs font-semibold text-slate-600">Unit Price</th>
+                    <th className="w-24 px-2 py-2 text-right text-xs font-semibold text-slate-600">Amount</th>
                     <th className="w-8 px-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {form.items.map((item, i) => (
-                    <tr key={i} className="border-t border-border">
+                    <tr key={i} className="border-t border-slate-200">
                       <td className="px-2 py-1.5">
                         <input value={item.desc} onChange={e => setItem(i, 'desc', e.target.value)}
                           placeholder="e.g. Monthly rent"
-                          className="w-full rounded border border-border px-2 py-1 text-xs outline-none focus:border-primary" />
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-xs outline-none focus:border-primary" />
                       </td>
                       <td className="px-2 py-1.5">
                         <input type="number" min="1" value={item.qty} onChange={e => setItem(i, 'qty', e.target.value)}
-                          className="w-full rounded border border-border px-2 py-1 text-right text-xs outline-none focus:border-primary" />
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-right text-xs outline-none focus:border-primary" />
                       </td>
                       <td className="px-2 py-1.5">
                         <input type="number" min="0" step="0.01" value={item.unitPrice}
                           onChange={e => setItem(i, 'unitPrice', e.target.value)} placeholder="0.00"
-                          className="w-full rounded border border-border px-2 py-1 text-right text-xs outline-none focus:border-primary" />
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-right text-xs outline-none focus:border-primary" />
                       </td>
                       <td className="px-2 py-1.5 text-right font-semibold">
                         {fmt(Number(item.qty || 1) * Number(item.unitPrice || 0))}
@@ -1803,10 +1897,10 @@ function PropertyInvoices() {
                 </tbody>
               </table>
             </div>
-            <div className="mt-2 space-y-1 rounded-xl bg-surface-2 p-3 text-xs">
-              <div className="flex justify-between text-ink-secondary"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
-              <div className="flex justify-between text-ink-secondary"><span>VAT (15%)</span><span>{fmt(vat)}</span></div>
-              <div className="flex justify-between border-t border-border pt-1 font-bold text-primary"><span>Total</span><span>{fmt(total)}</span></div>
+            <div className="mt-2 space-y-1 rounded-xl bg-slate-50 p-3 text-xs">
+              <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+              <div className="flex justify-between text-slate-600"><span>VAT (15%)</span><span>{fmt(vat)}</span></div>
+              <div className="flex justify-between border-t border-slate-200 pt-1 font-bold text-primary"><span>Total</span><span>{fmt(total)}</span></div>
             </div>
           </div>
 
@@ -1814,7 +1908,7 @@ function PropertyInvoices() {
             onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
             placeholder="Payment terms, references, or additional notes…" />
 
-          <div className="border-t border-border pt-4">
+          <div className="border-t border-slate-200 pt-4">
             <button onClick={save} disabled={saving}
               className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d] disabled:opacity-60">
               {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Invoice'}
@@ -1828,11 +1922,11 @@ function PropertyInvoices() {
         {viewing && (
           <div className="-m-6">
             {/* Action bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-2 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-3">
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadge(viewing.status)}`}>{viewing.status}</span>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setViewing(null); openEdit(viewing) }}
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold hover:bg-surface-2">
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-50">
                   <Pencil size={13} /> Edit
                 </button>
                 <button onClick={() => handleDownloadPDF(viewing)} disabled={downloading === viewing.id}
@@ -1853,20 +1947,20 @@ function PropertyInvoices() {
                 <div className="flex items-center gap-3">
                   {profile?.businessLogoUrl && (
                     <img src={profile.businessLogoUrl} alt="Logo"
-                      className="h-16 w-16 rounded-xl border border-border object-contain p-1" />
+                      className="h-16 w-16 rounded-xl border border-slate-200 object-contain p-1" />
                   )}
                   <div>
                     <p className="text-lg font-extrabold text-primary">{profile?.businessName || profile?.name}</p>
-                    {profile?.address   && <p className="text-xs text-ink-secondary">{profile.address}</p>}
-                    {profile?.phone     && <p className="text-xs text-ink-secondary">{profile.phone}</p>}
-                    {profile?.vatNumber && <p className="text-xs text-ink-secondary">VAT Reg: {profile.vatNumber}</p>}
+                    {profile?.address   && <p className="text-xs text-slate-600">{profile.address}</p>}
+                    {profile?.phone     && <p className="text-xs text-slate-600">{profile.phone}</p>}
+                    {profile?.vatNumber && <p className="text-xs text-slate-600">VAT Reg: {profile.vatNumber}</p>}
                   </div>
                 </div>
                 <div className="text-right">
                   <p className="text-3xl font-extrabold tracking-widest text-primary">TAX INVOICE</p>
-                  <p className="mt-1 text-xs text-ink-secondary">Invoice #: <strong className="text-ink">{viewing.invoiceNumber}</strong></p>
-                  <p className="text-xs text-ink-secondary">Issue Date: <strong className="text-ink">{viewing.issueDate}</strong></p>
-                  <p className="text-xs text-ink-secondary">Due Date: <strong className="text-ink">{viewing.dueDate}</strong></p>
+                  <p className="mt-1 text-xs text-slate-600">Invoice #: <strong className="text-slate-800">{viewing.invoiceNumber}</strong></p>
+                  <p className="text-xs text-slate-600">Issue Date: <strong className="text-slate-800">{viewing.issueDate}</strong></p>
+                  <p className="text-xs text-slate-600">Due Date: <strong className="text-slate-800">{viewing.dueDate}</strong></p>
                 </div>
               </div>
 
@@ -1874,20 +1968,20 @@ function PropertyInvoices() {
               <div className="mt-5 grid grid-cols-2 gap-6">
                 <div>
                   <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-primary">Bill To</p>
-                  <p className="font-bold text-ink">{viewing.tenantName || '—'}</p>
-                  {viewing.tenantEmail && <p className="text-xs text-ink-secondary">{viewing.tenantEmail}</p>}
-                  {viewing.tenantPhone && <p className="text-xs text-ink-secondary">{viewing.tenantPhone}</p>}
-                  {viewing.property    && <p className="text-xs text-ink-secondary">{viewing.property}</p>}
+                  <p className="font-bold text-slate-800">{viewing.tenantName || '—'}</p>
+                  {viewing.tenantEmail && <p className="text-xs text-slate-600">{viewing.tenantEmail}</p>}
+                  {viewing.tenantPhone && <p className="text-xs text-slate-600">{viewing.tenantPhone}</p>}
+                  {viewing.property    && <p className="text-xs text-slate-600">{viewing.property}</p>}
                 </div>
                 <div>
                   <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-primary">Property / Reference</p>
-                  {viewing.property    && <p className="font-bold text-ink">{viewing.property}</p>}
-                  {viewing.description && <p className="text-xs text-ink-secondary">{viewing.description}</p>}
+                  {viewing.property    && <p className="font-bold text-slate-800">{viewing.property}</p>}
+                  {viewing.description && <p className="text-xs text-slate-600">{viewing.description}</p>}
                 </div>
               </div>
 
               {/* Line items */}
-              <div className="mt-5 overflow-hidden rounded-xl border border-border">
+              <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-primary text-white">
@@ -1902,7 +1996,7 @@ function PropertyInvoices() {
                       ? viewing.items
                       : [{ desc: viewing.description, qty: 1, unitPrice: viewing.amount }]
                     ).map((item, i) => (
-                      <tr key={i} className={`border-t border-border ${i % 2 === 1 ? 'bg-surface-2/50' : ''}`}>
+                      <tr key={i} className={`border-t border-slate-200 ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
                         <td className="px-4 py-2">{item.desc || '—'}</td>
                         <td className="px-4 py-2 text-right">{item.qty || 1}</td>
                         <td className="px-4 py-2 text-right">{fmt(item.unitPrice ?? item.price ?? 0)}</td>
@@ -1917,10 +2011,10 @@ function PropertyInvoices() {
 
               {/* Totals */}
               <div className="ml-auto mt-4 max-w-xs space-y-1">
-                <div className="flex justify-between text-sm text-ink-secondary">
+                <div className="flex justify-between text-sm text-slate-600">
                   <span>Subtotal</span><span>{fmt(viewing.subtotal ?? viewing.amount ?? 0)}</span>
                 </div>
-                <div className="flex justify-between text-sm text-ink-secondary">
+                <div className="flex justify-between text-sm text-slate-600">
                   <span>VAT (15%)</span><span>{fmt(viewing.vat ?? 0)}</span>
                 </div>
                 <div className="flex justify-between rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">
@@ -1930,15 +2024,15 @@ function PropertyInvoices() {
 
               {/* Notes */}
               {viewing.notes && (
-                <div className="mt-5 rounded-xl border-l-4 border-primary bg-primary-light px-4 py-3">
+                <div className="mt-5 rounded-xl border-l-4 border-primary bg-primary/10 px-4 py-3">
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-primary">Notes</p>
-                  <p className="text-xs text-ink-secondary">{viewing.notes}</p>
+                  <p className="text-xs text-slate-600">{viewing.notes}</p>
                 </div>
               )}
 
               {/* Banking details */}
               {profile?.bankingDetails && (
-                <div className="mt-5 rounded-xl bg-surface-2 p-4">
+                <div className="mt-5 rounded-xl bg-slate-50 p-4">
                   <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-primary">Payment Details</p>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
                     {[
@@ -1949,14 +2043,14 @@ function PropertyInvoices() {
                       ['Account Type',   profile.bankingDetails.accountType],
                       ['Reference',      viewing.invoiceNumber || viewing.tenantName || ''],
                     ].flatMap(([k, v]) => [
-                      <span key={`k-${k}`} className="text-ink-secondary">{k}</span>,
+                      <span key={`k-${k}`} className="text-slate-600">{k}</span>,
                       <span key={`v-${k}`} className="font-semibold">{v}</span>,
                     ])}
                   </div>
                 </div>
               )}
 
-              <p className="mt-5 text-center text-[10px] text-ink-secondary">
+              <p className="mt-5 text-center text-[10px] text-slate-600">
                 Generated by Tlhiso — tlhiso.com · Thank you for your business
               </p>
             </div>
@@ -1968,18 +2062,18 @@ function PropertyInvoices() {
       <Modal open={!!emailModal} onClose={() => { setEmailModal(null); setEmailTo('') }} title="Email Invoice">
         {emailModal && (
           <div className="space-y-4">
-            <div className="rounded-xl bg-surface-2 px-4 py-3 text-xs">
-              <span className="text-ink-secondary">Invoice: </span>
+            <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs">
+              <span className="text-slate-600">Invoice: </span>
               <span className="font-semibold">{emailModal.invoiceNumber}</span>
-              <span className="mx-2 text-ink-secondary">·</span>
+              <span className="mx-2 text-slate-600">·</span>
               <span className="font-semibold text-primary">{fmt(emailModal.total)}</span>
-              <span className="mx-2 text-ink-secondary">due</span>
+              <span className="mx-2 text-slate-600">due</span>
               <span className="font-semibold">{emailModal.dueDate}</span>
             </div>
             <Field label="Recipient Email *" type="email" value={emailTo}
               onChange={e => setEmailTo(e.target.value)}
               placeholder={emailModal.tenantEmail || 'tenant@email.com'} />
-            <p className="text-xs text-ink-secondary">
+            <p className="text-xs text-slate-600">
               The invoice PDF will be attached. Status will update to <strong>Sent</strong> automatically.
             </p>
             <button onClick={handleEmail} disabled={emailing}
@@ -1999,7 +2093,7 @@ function PropertyInvoices() {
 const PROP_APPT_STATUS = ['Scheduled', 'Confirmed', 'Completed', 'Cancelled', 'No-show']
 
 function PropertyAppointments() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const uid = user?.uid
   const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
   const tenants = useCollection(uid ? `users/${uid}/tenants` : null)
@@ -2018,6 +2112,28 @@ function PropertyAppointments() {
         status: 'Confirmed', confirmationStatus: 'confirmed',
         rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
       })
+      if (appt.customerPhone) {
+        try {
+          const fn  = httpsCallable(functions, 'sendSMS')
+          const msg = `Hi ${appt.customer}, your reschedule request has been accepted. Your new appointment is confirmed for ${fmtDate(appt.rescheduleDate)} at ${appt.rescheduleTime}.`
+          await fn({ to: appt.customerPhone, message: msg })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.customerPhone, type: 'sms', body: msg,
+            module: 'reschedule-accepted', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      } else if (appt.customerEmail) {
+        try {
+          const fn      = httpsCallable(functions, 'sendEmail')
+          const subject = 'Appointment Reschedule Confirmed'
+          const htmlBody = `<p>Hi ${appt.customer}, your reschedule request has been accepted. Your new appointment is confirmed for ${fmtDate(appt.rescheduleDate)} at ${appt.rescheduleTime}.</p>`
+          await fn({ to: appt.customerEmail, subject, htmlBody })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.customerEmail, type: 'email', body: subject,
+            module: 'reschedule-accepted', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      }
     } finally { setRescheduleBusy(null) }
   }
 
@@ -2028,7 +2144,63 @@ function PropertyAppointments() {
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), {
         confirmationStatus: null, rescheduleDate: null, rescheduleTime: null, rescheduleNote: null,
       })
+      if (appt.customerPhone) {
+        try {
+          const fn  = httpsCallable(functions, 'sendSMS')
+          const msg = `Hi ${appt.customer}, your reschedule request could not be accommodated. Your original appointment remains on ${fmtDate(appt.date)} at ${appt.time}.`
+          await fn({ to: appt.customerPhone, message: msg })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.customerPhone, type: 'sms', body: msg,
+            module: 'reschedule-declined', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      } else if (appt.customerEmail) {
+        try {
+          const fn      = httpsCallable(functions, 'sendEmail')
+          const subject = 'Appointment Reschedule Request Update'
+          const htmlBody = `<p>Hi ${appt.customer}, your reschedule request could not be accommodated. Your original appointment remains on ${fmtDate(appt.date)} at ${appt.time}.</p>`
+          await fn({ to: appt.customerEmail, subject, htmlBody })
+          await addDoc(collection(db, 'users', uid, 'messages'), {
+            to: appt.customerEmail, type: 'email', body: subject,
+            module: 'reschedule-declined', status: 'sent', sentAt: serverTimestamp(),
+          })
+        } catch { /* non-blocking */ }
+      }
     } finally { setRescheduleBusy(null) }
+  }
+
+  async function setApptStatus(appt, status) {
+    await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { status })
+    if (status === 'Completed' && profile?.googleReviewLink) {
+      const phone = appt.customerPhone
+      const email = appt.customerEmail
+      if (phone || email) {
+        const alreadySent = appt.reviewSent ||
+          appointments.some(a => a.reviewSent && a.id !== appt.id && (phone ? a.customerPhone === phone : a.customerEmail === email))
+        if (alreadySent) return
+        const firstName = (appt.customer || 'there').split(' ')[0]
+        const link = profile.googleReviewLinkShort || profile.googleReviewLink
+        try {
+          if (phone) {
+            await httpsCallable(functions, 'sendSMS')({ to: phone, message: `Hi ${firstName}, thank you! We'd love your feedback. Please leave us a Google review: ${link}` })
+          } else {
+            await httpsCallable(functions, 'sendEmail')({
+              to: email,
+              subject: 'Thank you — please leave us a review',
+              htmlBody: `<p>Hi ${firstName}, thank you for your visit! We would love your feedback.</p><p><a href="${link}">Leave a Google Review</a></p>`,
+            })
+          }
+          await Promise.all([
+            addDoc(collection(db, 'users', uid, 'messages'), {
+              to: phone || email, type: phone ? 'sms' : 'email',
+              body: `Review request sent to ${firstName}`,
+              module: 'review-request', status: 'sent', sentAt: serverTimestamp(),
+            }),
+            updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reviewSent: true }),
+          ])
+        } catch { /* non-blocking */ }
+      }
+    }
   }
 
   async function save() {
@@ -2040,6 +2212,9 @@ function PropertyAppointments() {
         ...form,
         customer: tenant ? `${tenant.firstName} ${tenant.lastName}` : '',
         customerPhone: tenant?.phone ?? '',
+        customerEmail: tenant?.email ?? '',
+        ownerPhone: profile?.phone ?? '',
+        ownerEmail: user?.email ?? '',
         createdAt: serverTimestamp(),
       })
       setForm({ tenantId: '', date: new Date().toISOString().slice(0, 10), time: '', purpose: '', location: '', status: 'Scheduled', notes: '' })
@@ -2053,14 +2228,14 @@ function PropertyAppointments() {
     try {
       const fn = httpsCallable(functions, 'sendSMS')
       const link = `https://tlhiso.com/appt/${uid}/${appt.id}`
-      const msg = `Reminder: ${appt.customer}, you have a property appointment on ${appt.date} at ${appt.time}. Confirm, cancel or reschedule: ${link}`
+      const msg = `Reminder: ${appt.customer}, you have a property appointment on ${fmtDate(appt.date)} at ${appt.time}. Confirm, cancel or reschedule: ${link}`
       await fn({ to: appt.customerPhone, message: msg })
       await updateDoc(doc(db, 'users', uid, 'appointments', appt.id), { reminderSent: true })
       await addDoc(collection(db, 'users', uid, 'messages'), { to: appt.customerPhone, type: 'sms', body: msg, module: 'appointment-reminder', status: 'sent', sentAt: serverTimestamp() })
     } catch { alert('Reminder failed — check BulkSMS credentials.') } finally { setSendingId(null) }
   }
 
-  const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary-light text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-surface-2 text-ink-secondary')
+  const badge = s => ({ Scheduled: 'bg-blue-50 text-blue-600', Confirmed: 'bg-primary/10 text-primary', Completed: 'bg-green-50 text-green-600', Cancelled: 'bg-red-50 text-red-500', 'No-show': 'bg-orange-50 text-orange-500' }[s] || 'bg-slate-50 text-slate-600')
 
   const cols = [
     { key: 'date', label: 'Date', render: r => fmtDate(r.date) },
@@ -2072,10 +2247,10 @@ function PropertyAppointments() {
         className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
         <MapPin size={12} /> {r.location}
       </a>
-    ) : <span className="text-xs text-ink-secondary">—</span> },
+    ) : <span className="text-xs text-slate-600">—</span> },
     { key: 'status', label: 'Status', render: r => (
       <div className="space-y-1">
-        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); updateDoc(doc(db, 'users', uid, 'appointments', r.id), { status: e.target.value }) }}
+        <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
           className={`rounded-full border-0 px-2 py-1 text-[11px] font-semibold ${badge(r.status)}`}>
           {PROP_APPT_STATUS.map(s => <option key={s}>{s}</option>)}
         </select>
@@ -2083,8 +2258,8 @@ function PropertyAppointments() {
           r.confirmationStatus === 'reschedule-requested' ? (
             <div className="mt-1 space-y-1" onClick={e => e.stopPropagation()}>
               <span className="block w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">⟳ Reschedule requested</span>
-              {r.rescheduleDate && <p className="text-[10px] text-ink-secondary">{r.rescheduleDate} {r.rescheduleTime || ''}</p>}
-              {r.rescheduleNote && <p className="text-[10px] italic text-ink-secondary">{r.rescheduleNote}</p>}
+              {r.rescheduleDate && <p className="text-[10px] text-slate-600">{fmtDate(r.rescheduleDate)} {r.rescheduleTime || ''}</p>}
+              {r.rescheduleNote && <p className="text-[10px] italic text-slate-600">{r.rescheduleNote}</p>}
               <div className="flex gap-1">
                 <button onClick={() => acceptReschedule(r)} disabled={rescheduleBusy === r.id}
                   className="rounded px-2 py-0.5 text-[10px] font-semibold bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50 transition">Accept</button>
@@ -2102,7 +2277,7 @@ function PropertyAppointments() {
     )},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} title="Send SMS reminder" className="rounded p-1 text-primary hover:bg-primary-light disabled:opacity-50">
+        <button onClick={() => sendReminder(r)} disabled={sendingId === r.id} title="Send SMS reminder" className="rounded p-1 text-primary hover:bg-primary/10 disabled:opacity-50">
           {sendingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
         </button>
         <button onClick={() => { if (!window.confirm('Delete this appointment? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'appointments', r.id)) }}
@@ -2142,37 +2317,6 @@ function PropertyAppointments() {
           <button onClick={save} disabled={saving} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving ? 'Saving…' : 'Save Appointment'}</button>
         </div>
       </Modal>
-    </div>
-  )
-}
-
-// ── Messages ──────────────────────────────────────────────────────────────────
-function Messages() {
-  const { user } = useAuth()
-  const uid = user?.uid
-  const messages = useCollection(uid ? `users/${uid}/messages` : null)
-  const sorted = useMemo(() => [...messages].sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0)), [messages])
-  const counts = useMemo(() => { const c = { sms: 0, email: 0, whatsapp: 0 }; messages.forEach(m => { if (m.type in c) c[m.type]++ }); return c }, [messages])
-  const channelBadge = t => ({ sms: 'bg-blue-100 text-blue-600', email: 'bg-emerald-100 text-emerald-700', whatsapp: 'bg-green-100 text-green-600' }[t] ?? 'bg-gray-100 text-gray-500')
-  const cols = [
-    { key: 'type', label: 'Channel', render: r => <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${channelBadge(r.type)}`}>{r.type}</span> },
-    { key: 'to', label: 'Recipient' },
-    { key: 'body', label: 'Message', render: r => <span className="line-clamp-2 max-w-xs text-sm text-ink-secondary">{r.body}</span> },
-    { key: 'module', label: 'Source', render: r => <span className="capitalize text-xs text-ink-secondary">{(r.module || '—').replace(/-/g, ' ')}</span> },
-    { key: 'sentAt', label: 'Sent', render: r => <span className="text-xs text-ink-secondary">{r.sentAt?.toDate?.()?.toLocaleDateString('en-ZA') ?? '—'}</span> },
-  ]
-  return (
-    <div className="space-y-4">
-      <PageHead title="Messages" subtitle="Log of all messages sent from your account" />
-      <div className="grid grid-cols-3 gap-4">
-        {[{ label: 'SMS Sent', val: counts.sms, color: 'text-blue-600' }, { label: 'Emails Sent', val: counts.email, color: 'text-emerald-600' }, { label: 'WhatsApp Sent', val: counts.whatsapp, color: 'text-green-600' }].map(s => (
-          <div key={s.label} className="rounded-card border border-border bg-white p-4 shadow-card text-center">
-            <p className={`text-2xl font-extrabold ${s.color}`}>{s.val}</p>
-            <p className="mt-1 text-xs font-semibold text-ink-secondary">{s.label}</p>
-          </div>
-        ))}
-      </div>
-      <DataTable columns={cols} data={sorted} emptyMessage="No messages sent yet." />
     </div>
   )
 }
@@ -2218,7 +2362,7 @@ function Documents() {
     { key: 'tenant', label: 'Tenant' },
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-2">
-        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light">View</a>}
+        {r.fileUrl && <a href={r.fileUrl} target="_blank" rel="noreferrer" className="rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10">View</a>}
         <button onClick={e => { e.stopPropagation(); if (!window.confirm('Delete this document? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'documents', r.id)) }}
           className="rounded p-1 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
       </div>
@@ -2245,8 +2389,8 @@ function Documents() {
             {tenants.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
           </Field>
           <div>
-            <span className="mb-1.5 block text-xs font-semibold text-ink-secondary">File *</span>
-            <input type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} className="text-sm text-ink-secondary" />
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">File *</span>
+            <input type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} className="text-sm text-slate-600" />
           </div>
           <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           <button onClick={save} disabled={uploading} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-60">
@@ -2275,12 +2419,13 @@ export default function PropertyDashboard() {
         <Route path="invoices"   element={<PropertyInvoices />} />
         <Route path="maintenance" element={<Maintenance />} />
         <Route path="appointments" element={<PropertyAppointments />} />
-        <Route path="messages" element={<Messages />} />
         <Route path="documents" element={<Documents />} />
-        <Route path="campaigns" element={<CampaignsModule industry="property" />} />
-        <Route path="profile" element={<ProfilePage industry="property" />} />
+        <Route path="campaigns"    element={<CampaignsModule industry="property" />} />
+        <Route path="automations" element={<AutomationsModule industry="property" />} />
+        <Route path="surveys"   element={<SurveysModule industry="property" />} />
+        <Route path="profile"   element={<ProfilePage industry="property" />} />
         <Route path="settings" element={<Settings />} />
-        <Route path="*" element={<div><h2 className="text-base font-bold text-ink mb-3">Coming Soon</h2><p className="text-sm text-ink-secondary">This section is being built.</p></div>} />
+        <Route path="*" element={<div><h2 className="text-base font-bold text-slate-800 mb-3">Coming Soon</h2><p className="text-sm text-slate-600">This section is being built.</p></div>} />
       </Routes>
     </DashboardLayout>
   )

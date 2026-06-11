@@ -61,5 +61,17 @@ service cloud.firestore {
     match /superadmin/{document=**} {
       allow read, write: if isSuperAdmin();
     }
+
+    // ── Platform notifications (super admin → users) ───────────────────────
+    match /notifications/{id} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Support messages (users → super admin) ────────────────────────────
+    match /support_messages/{id} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if isSuperAdmin();
+    }
   }
 }

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { httpsCallable } from 'firebase/functions'
-import { functions } from '../../services/firebase'
+import { getDoc, doc } from 'firebase/firestore'
+import { functions, db } from '../../services/firebase'
 import { PLANS, dashboardPathFor } from '../../utils/industries'
 import AuthShell from './AuthShell'
-import { CheckCircle, Shield, Loader2, ArrowLeft } from 'lucide-react'
+import { CheckCircle, Shield, Loader2, ArrowLeft, FileText, Mail } from 'lucide-react'
+
 
 // Feature list per plan for the checkout summary card
 const PLAN_FEATURES = {
@@ -52,9 +54,18 @@ export default function CheckoutPage() {
   const location = useLocation()
   const isComplete = location.pathname === '/checkout/complete'
 
-  const [paying, setPaying] = useState(false)
-  const [error, setError] = useState('')
-  const [sdkReady, setSdkReady] = useState(false)
+  const [paying,          setPaying]          = useState(false)
+  const [error,           setError]           = useState('')
+  const [sdkReady,        setSdkReady]        = useState(false)
+  const [invoiceSending,   setInvoiceSending]   = useState(false)
+  const [invoiceRequested, setInvoiceRequested] = useState(false)
+  const [banking,          setBanking]          = useState(null)
+
+  useEffect(() => {
+    getDoc(doc(db, 'superadmin', 'settings')).then(snap => {
+      if (snap.exists() && snap.data().banking) setBanking(snap.data().banking)
+    })
+  }, [])
 
   const plan = profile?.plan ? PLANS[profile.plan] : null
   const features = profile?.plan ? (PLAN_FEATURES[profile.plan] ?? []) : []
@@ -108,6 +119,54 @@ export default function CheckoutPage() {
     } catch (e) {
       setError(e.message || 'Payment failed. Please try again.')
       setPaying(false)
+    }
+  }
+
+  // ── Request invoice (temporary EFT option) ───────────────────────────────
+  async function handleInvoiceRequest() {
+    if (!user || !plan) return
+    setInvoiceSending(true)
+    setError('')
+    const ref = user.email
+    const b = banking || {}
+    const invoiceHtml = `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto">
+        <h2 style="color:#5B8E7D">Tlhiso — Invoice Request</h2>
+        <p>Hi ${profile?.name || 'there'},</p>
+        <p>Thank you for choosing Tlhiso. Please use the details below to complete your EFT payment.</p>
+        <table style="width:100%;border-collapse:collapse;margin:20px 0">
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Plan</td><td style="padding:10px">${plan.name}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold">Amount</td><td style="padding:10px">R${plan.price.toLocaleString('en-ZA')}/month</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Bank</td><td style="padding:10px">${b.bank || ''}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold">Account name</td><td style="padding:10px">${b.accountName || ''}</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account number</td><td style="padding:10px">${b.account || ''}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold">Branch code</td><td style="padding:10px">${b.branch || ''}</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account type</td><td style="padding:10px">${b.type || ''}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold;color:#5B8E7D">Payment reference</td><td style="padding:10px;font-weight:bold;color:#5B8E7D">${ref}</td></tr>
+        </table>
+        <p style="background:#fffbeb;border:1px solid #fcd34d;padding:12px;border-radius:8px;font-size:13px">
+          <strong>Important:</strong> Use <strong>${ref}</strong> as your payment reference so we can match your payment. Your account will be activated within 24 hours of payment confirmation.
+        </p>
+        <p style="color:#64748b;font-size:12px">Questions? <a href="mailto:support@tlhiso.com">support@tlhiso.com</a></p>
+      </div>`
+    try {
+      await Promise.all([
+        httpsCallable(functions, 'sendEmail')({
+          to: user.email,
+          subject: `Tlhiso Invoice — ${plan.name} Plan (R${plan.price.toLocaleString('en-ZA')}/mo)`,
+          htmlBody: invoiceHtml,
+        }),
+        httpsCallable(functions, 'sendEmail')({
+          to: 'support@tlhiso.com',
+          subject: `Invoice requested — ${profile?.name || user.email} (${plan.name})`,
+          htmlBody: `<p><strong>${profile?.name || user.email}</strong> requested an invoice for the <strong>${plan.name}</strong> plan (R${plan.price.toLocaleString('en-ZA')}/mo).</p><p>Email: ${user.email}</p><p>Activate their account once payment is confirmed.</p>`,
+        }),
+      ])
+      setInvoiceRequested(true)
+    } catch (e) {
+      setError('Could not send invoice. Please email support@tlhiso.com directly.')
+    } finally {
+      setInvoiceSending(false)
     }
   }
 
@@ -204,6 +263,35 @@ export default function CheckoutPage() {
             <><GoogleIcon /> Pay with Google Pay</>
           )}
         </button>
+
+        {/* ── Divider ── */}
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs font-medium text-ink-secondary">or</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        {/* ── Invoice / EFT option ── */}
+        {invoiceRequested ? (
+          <div className="rounded-2xl border border-green-200 bg-green-50 px-5 py-4 text-center">
+            <CheckCircle size={24} className="mx-auto mb-2 text-green-600" />
+            <p className="text-sm font-bold text-green-800">Invoice sent!</p>
+            <p className="mt-1 text-xs text-green-700">
+              Check your inbox at <strong>{user?.email}</strong>. Your account will be activated within 24 hours of payment confirmation.
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={handleInvoiceRequest}
+            disabled={invoiceSending || !banking}
+            title={!banking ? 'Banking details not configured yet — contact support@tlhiso.com' : ''}
+            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white py-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-primary hover:text-primary disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {invoiceSending
+              ? <><Loader2 size={15} className="animate-spin" /> Sending invoice…</>
+              : <><FileText size={15} /> Request Invoice &amp; Pay by EFT</>}
+          </button>
+        )}
 
         {/* PayFast trust badge */}
         <div className="flex items-start gap-3 rounded-xl border border-border bg-surface-2 px-4 py-3">

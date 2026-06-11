@@ -4,7 +4,12 @@
       "target": "production",
       "public": "dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "rewrites": [
+        { "source": "/track/open",      "function": "trackOpen",           "region": "us-central1" },
+        { "source": "/track/click",     "function": "trackClick",          "region": "us-central1" },
+        { "source": "/sms-delivery",    "function": "smsDeliveryWebhook",  "region": "us-central1" },
+        { "source": "**", "destination": "/index.html" }
+      ],
       "headers": [
         {
           "source": "**/*.@(js|css|woff2)",
@@ -16,7 +21,12 @@
       "target": "staging",
       "public": "dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+      "rewrites": [
+        { "source": "/track/open",   "function": "trackOpen",          "region": "us-central1" },
+        { "source": "/track/click",  "function": "trackClick",         "region": "us-central1" },
+        { "source": "/sms-delivery", "function": "smsDeliveryWebhook", "region": "us-central1" },
+        { "source": "**", "destination": "/index.html" }
+      ]
     }
   ],
   "firestore": {
