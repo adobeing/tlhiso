@@ -14,6 +14,7 @@ import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X, FileText, Users, Rec
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import CampaignsModule from '../../shared/CampaignsModule'
 import AutomationsModule from '../../shared/AutomationsModule'
+import FinanceModule from '../../shared/FinanceModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import CampaignSnapshot from '../../shared/CampaignSnapshot'
@@ -619,9 +620,10 @@ function Invoices() {
   const uid = user?.uid
   const invoices = useCollection(uid ? `users/${uid}/invoices` : null)
   const clients  = useCollection(uid ? `users/${uid}/customers` : null)
-  const [open,       setOpen]       = useState(false)
-  const [viewing,    setViewing]    = useState(null)
-  const [emailingId, setEmailingId] = useState(null)
+  const [open,        setOpen]        = useState(false)
+  const [viewing,     setViewing]     = useState(null)
+  const [emailingId,  setEmailingId]  = useState(null)
+  const [remindingId, setRemindingId] = useState(null)
   const [form, setForm] = useState({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }] })
 
   const total = form.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0)
@@ -700,6 +702,60 @@ function Invoices() {
     finally { setEmailingId(null) }
   }
 
+  // QuickBooks-style payment reminder for Sent/Overdue invoices
+  async function sendReminder(inv) {
+    const client = clients.find(c => c.id === inv.clientId)
+    const to = client?.email || inv.clientEmail
+    if (!to) { alert('No email address on file for this client. Update the client record first.'); return }
+    setRemindingId(inv.id)
+    const bizName = profile?.businessName || profile?.name || 'Tlhiso'
+    const daysOverdue = inv.dueDate && inv.dueDate < today
+      ? Math.floor((new Date(today) - new Date(inv.dueDate)) / 86400000)
+      : 0
+    const fmtE = n => `R ${Number(n ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`
+    const htmlBody = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b">
+      <div style="padding-bottom:16px;border-bottom:2px solid ${daysOverdue > 0 ? '#ef4444' : '#5B8E7D'}">
+        <h2 style="margin:0;color:${daysOverdue > 0 ? '#ef4444' : '#5B8E7D'}">Payment Reminder</h2>
+        <p style="margin:4px 0 0;font-size:13px;color:#64748b">${bizName}</p>
+      </div>
+      <p style="font-size:14px;line-height:1.7;margin:20px 0">Hi ${inv.client || 'there'},</p>
+      <p style="font-size:14px;line-height:1.7;margin:0 0 20px">
+        ${daysOverdue > 0
+          ? `This is a friendly reminder that the invoice below is now <strong style="color:#ef4444">${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue</strong>. We'd appreciate your payment at your earliest convenience.`
+          : `This is a friendly reminder that the invoice below is due soon. If you've already paid, please disregard this message.`}
+      </p>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin:0 0 20px">
+        <p style="margin:0 0 4px;font-size:13px;color:#334155">Invoice: <strong>${inv.invoiceNumber || '—'}</strong></p>
+        <p style="margin:0 0 4px;font-size:13px;color:#334155">Amount due: <strong>${fmtE(inv.total)}</strong></p>
+        ${inv.dueDate ? `<p style="margin:0;font-size:13px;color:${daysOverdue > 0 ? '#ef4444' : '#334155'}">Due date: <strong>${inv.dueDate}</strong></p>` : ''}
+      </div>
+      <p style="font-size:13px;line-height:1.7;color:#64748b">If you have any questions about this invoice, simply reply to this email.</p>
+      <hr style="margin:24px 0;border:none;border-top:1px solid #e2e8f0"/>
+      <p style="font-size:12px;color:#94a3b8">Sent via Tlhiso · <a href="https://tlhiso.com" style="color:#5B8E7D">tlhiso.com</a></p>
+    </div>`
+    try {
+      const res = await httpsCallable(functions, 'sendEmail')({
+        to,
+        subject: `Payment reminder — Invoice ${inv.invoiceNumber || ''} from ${bizName}`.replace('  ', ' '),
+        htmlBody,
+      })
+      if (!res.data?.success) throw new Error(res.data?.error || 'Email send failed')
+      await Promise.all([
+        updateDoc(doc(db, 'users', uid, 'invoices', inv.id), {
+          lastReminderAt: serverTimestamp(),
+          reminderCount: (inv.reminderCount ?? 0) + 1,
+        }),
+        addDoc(collection(db, 'users', uid, 'messages'), {
+          to, type: 'email',
+          body: `Payment reminder for invoice ${inv.invoiceNumber || ''} (${fmtE(inv.total)}) sent to ${to}`,
+          module: 'invoice-reminder', status: 'sent', sentAt: serverTimestamp(),
+        }),
+      ])
+      alert(`Payment reminder sent to ${to}`)
+    } catch(e) { alert('Failed to send reminder: ' + e.message) }
+    finally { setRemindingId(null) }
+  }
+
   const cols = [
     { key: 'invoiceNumber', label: '#', render: r => <span className="font-mono text-xs text-slate-600">{r.invoiceNumber || '—'}</span> },
     { key: 'client',  label: 'Client' },
@@ -717,6 +773,13 @@ function Invoices() {
           className="rounded p-1 text-blue-500 hover:bg-blue-50 disabled:opacity-40">
           {emailingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
         </button>
+        {(effectiveStatus(r) === 'Sent' || effectiveStatus(r) === 'Overdue') && (
+          <button onClick={() => sendReminder(r)} disabled={remindingId === r.id}
+            title={r.reminderCount ? `Send payment reminder (${r.reminderCount} sent)` : 'Send payment reminder'}
+            className={`rounded p-1 hover:bg-amber-50 disabled:opacity-40 ${effectiveStatus(r) === 'Overdue' ? 'text-amber-600' : 'text-slate-400'}`}>
+            {remindingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
+          </button>
+        )}
         <button onClick={() => updateDoc(doc(db, 'users', uid, 'invoices', r.id), { status: 'Paid' })}
           className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50">Mark Paid</button>
         <button onClick={() => { if (!window.confirm('Delete this invoice? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'invoices', r.id)) }}
@@ -1956,6 +2019,7 @@ export default function B2BDashboard() {
         <Route path="invoices" element={<Invoices />} />
         <Route path="statements" element={<Statements />} />
         <Route path="quotations" element={<Quotations />} />
+        <Route path="finance" element={<FinanceModule industry="b2b" />} />
         <Route path="projects" element={<Projects />} />
         <Route path="service-list" element={<ServiceList />} />
         <Route path="appointments" element={<Appointments />} />

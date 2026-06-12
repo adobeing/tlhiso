@@ -17,6 +17,7 @@ import {
   Building2, HeartPulse, Map, ShoppingBag, Menu, X,
   Stethoscope, FileCheck, ArrowRightLeft, ClipboardSignature, HardHat,
   Star, Tag, List, CalendarClock, Zap, HelpCircle, Loader2, CheckCircle, Send, MessageSquare,
+  Wallet,
 } from 'lucide-react'
 
 const NAV_MAP = {
@@ -26,6 +27,7 @@ const NAV_MAP = {
     { label: 'Invoices', icon: Receipt, to: '/b2b/invoices' },
     { label: 'Statements', icon: FileText, to: '/b2b/statements' },
     { label: 'Quotations', icon: ClipboardList, to: '/b2b/quotations' },
+    { label: 'Finance', icon: Wallet, to: '/b2b/finance' },
     { label: 'Projects', icon: FolderKanban, to: '/b2b/projects' },
     { label: 'Service List', icon: ClipboardSignature, to: '/b2b/service-list' },
     { label: 'Appointments', icon: Calendar, to: '/b2b/appointments' },
@@ -55,6 +57,7 @@ const NAV_MAP = {
     { label: 'Rent Roll',        icon: List,            to: '/property/rent-roll' },
     { label: 'Owner Statements', icon: FileText,        to: '/property/statements' },
     { label: 'Invoices',         icon: Receipt,         to: '/property/invoices'   },
+    { label: 'Finance',          icon: Wallet,          to: '/property/finance' },
     { label: 'Maintenance',      icon: Wrench,          to: '/property/maintenance' },
     { label: 'Appointments',     icon: Calendar,        to: '/property/appointments' },
     { label: 'Campaigns',        icon: Megaphone,       to: '/property/campaigns' },
@@ -338,7 +341,7 @@ export default function DashboardLayout({ industry, children, pageTitle }) {
     return [
       ...navItems,
       { label: 'Profile', icon: Users,       to: `/${industry}/profile` },
-      { label: 'POPIA',   icon: ShieldCheck, to: `/${industry}/popia` },
+      { label: 'POPIA',   icon: ShieldCheck, to: `/${industry}/settings` },
     ]
   }, [navItems, industry])
 

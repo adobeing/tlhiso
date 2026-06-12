@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import AutomationsModule from '../../shared/AutomationsModule'
+import FinanceModule from '../../shared/FinanceModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
@@ -2417,6 +2418,7 @@ export default function PropertyDashboard() {
         <Route path="rent-roll" element={<RentRoll />} />
         <Route path="statements" element={<OwnerStatements />} />
         <Route path="invoices"   element={<PropertyInvoices />} />
+        <Route path="finance"    element={<FinanceModule industry="property" />} />
         <Route path="maintenance" element={<Maintenance />} />
         <Route path="appointments" element={<PropertyAppointments />} />
         <Route path="documents" element={<Documents />} />
