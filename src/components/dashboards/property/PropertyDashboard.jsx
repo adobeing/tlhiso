@@ -8,7 +8,7 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignSnapshot from '../../shared/CampaignSnapshot'
+import CampaignPromoCard from '../../shared/CampaignPromoCard'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
@@ -194,6 +194,8 @@ function Overview() {
         subtitle="Here's how your portfolio is performing."
       />
 
+      <CampaignPromoCard campaignsPath="/property/campaigns" />
+
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Properties" value={properties.length} icon="🏘️" trend={`${tenants.length} tenants total`} trendTone="flat" />
@@ -205,9 +207,6 @@ function Overview() {
           trend={openMaintenance.length ? 'Needs attention' : 'All clear'}
           trendTone={openMaintenance.length ? 'down' : 'up'} />
       </div>
-
-      {/* Campaign snapshot */}
-      <CampaignSnapshot industry="property" />
 
       {/* Properties grid + Alerts side by side */}
       <div className="grid gap-6 lg:grid-cols-3">

@@ -17,7 +17,7 @@ import AutomationsModule from '../../shared/AutomationsModule'
 import FinanceModule from '../../shared/FinanceModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignSnapshot from '../../shared/CampaignSnapshot'
+import CampaignPromoCard from '../../shared/CampaignPromoCard'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SurveysModule from '../../shared/SurveysModule'
 import SettingsPage from '../../shared/SettingsPage'
@@ -135,6 +135,8 @@ function Overview() {
         subtitle="Your business at a glance."
       />
 
+      <CampaignPromoCard campaignsPath="/b2b/campaigns" />
+
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatCard label="Total Clients" value={clients.length} icon="👥" />
@@ -147,9 +149,6 @@ function Overview() {
           trend={`${quotations.filter(q => q.status === 'Draft' || q.status === 'Sent').length} open quote${quotations.filter(q => q.status === 'Draft' || q.status === 'Sent').length !== 1 ? 's' : ''}`}
           trendTone="up" />
       </div>
-
-      {/* Campaign snapshot */}
-      <CampaignSnapshot industry="b2b" />
 
       {/* Chart + Upcoming */}
       <div className="grid gap-6 lg:grid-cols-3">

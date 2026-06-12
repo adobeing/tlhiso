@@ -8,7 +8,7 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignSnapshot from '../../shared/CampaignSnapshot'
+import CampaignPromoCard from '../../shared/CampaignPromoCard'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
@@ -469,6 +469,7 @@ function Overview() {
         <h2 className="text-lg font-bold text-slate-800">{`Welcome back${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`}</h2>
         <p className="mt-0.5 text-sm text-slate-600">Your practice at a glance.</p>
       </div>
+      <CampaignPromoCard campaignsPath="/medical/campaigns" />
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Patients" value={patients.length} icon="🫀"
@@ -477,9 +478,6 @@ function Overview() {
         <StatCard label="Consultations This Week" value={thisWeekConsultations.length} icon="🩺" color="purple" />
         <StatCard label="Pending Referrals" value={pendingReferrals.length} icon="📋" color="orange" />
       </div>
-
-      {/* Campaign snapshot */}
-      <CampaignSnapshot industry="medical" />
 
       {/* Chart + Today's schedule */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

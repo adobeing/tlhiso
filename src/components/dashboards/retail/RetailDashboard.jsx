@@ -17,7 +17,7 @@ import AutomationsModule from '../../shared/AutomationsModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignSnapshot from '../../shared/CampaignSnapshot'
+import CampaignPromoCard from '../../shared/CampaignPromoCard'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
 import { fmtDate } from '../../../utils/dates'
@@ -123,6 +123,8 @@ function Overview() {
         subtitle="Your customers and campaigns at a glance."
       />
 
+      <CampaignPromoCard campaignsPath="/retail/campaigns" />
+
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Customers" value={customers.length} icon="👥"
@@ -132,9 +134,6 @@ function Overview() {
         <StatCard label="Active Deals" value={activeDeals.length} icon="🏷️" color="orange"
           trend={deals.length ? `${deals.length} total` : 'None yet'} trendTone="flat" />
       </div>
-
-      {/* Campaign snapshot */}
-      <CampaignSnapshot industry="retail" />
 
       {/* Chart + Today */}
       <div className="grid gap-6 lg:grid-cols-3">
