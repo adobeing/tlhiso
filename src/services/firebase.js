@@ -14,6 +14,7 @@
 // here that belongs to the other environment.
 // ---------------------------------------------------------------------------
 import { initializeApp } from 'firebase/app'
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
@@ -62,6 +63,28 @@ if (
 }
 
 const app = initializeApp(firebaseConfig)
+
+// --- App Check (reCAPTCHA v3) ------------------------------------------------
+// Protects Firestore / Storage / Cloud Functions against abuse. The site key
+// must be registered under App Check for this app in the Firebase Console
+// (per environment) before enforcement is switched on there.
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY
+if (RECAPTCHA_SITE_KEY) {
+  // In local dev the registered domains won't match localhost; a debug token
+  // (printed to the browser console on first run, then whitelisted in the
+  // Firebase Console) keeps everything working.
+  if (import.meta.env.DEV) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+      isTokenAutoRefreshEnabled: true,
+    })
+  } catch (e) {
+    console.error('[firebase] App Check init failed:', e.message)
+  }
+} else {
+  console.warn(`[firebase] VITE_RECAPTCHA_SITE_KEY missing for env "${APP_ENV}" — App Check disabled.`)
+}
 
 export const auth = getAuth(app)
 export const db = getFirestore(app)

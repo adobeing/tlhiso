@@ -510,7 +510,7 @@ export default function LandingPage() {
 
               </ul>
             </div>
-          </div>cre
+          </div>
 
           <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-border/50 pt-8 text-xs text-ink-secondary/70 md:flex-row">
             <p>© {new Date().getFullYear()} Tlhiso. All rights reserved.</p>
