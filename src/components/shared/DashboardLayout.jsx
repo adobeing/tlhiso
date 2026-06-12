@@ -511,15 +511,6 @@ export default function DashboardLayout({ industry, children, pageTitle }) {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* New Campaign quick action — campaigning is the core of the platform */}
-            {industry !== 'superadmin' && (
-              <Link
-                to={`/${industry}/campaigns`}
-                className="hidden items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/20 transition hover:bg-[#4e7d6d] sm:flex"
-              >
-                <Megaphone size={15} /> New Campaign
-              </Link>
-            )}
             <div className="relative hidden md:block group">
               <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-primary" />
               <input
