@@ -18,6 +18,7 @@ import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import CampaignPromoCard from '../../shared/CampaignPromoCard'
+import InboxModule from '../../shared/InboxModule'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
 import { fmtDate } from '../../../utils/dates'
@@ -649,6 +650,7 @@ export default function RetailDashboard() {
         <Route path="surveys" element={<SurveysModule industry="retail" />} />
         <Route path="optin" element={<OptIn />} />
         <Route path="campaigns"    element={<CampaignsModule industry="retail" />} />
+        <Route path="inbox" element={<InboxModule industry="retail" />} />
         <Route path="automations" element={<AutomationsModule industry="retail" />} />
         <Route path="profile" element={<ProfilePage industry="retail" />} />
         <Route path="settings" element={<Settings />} />

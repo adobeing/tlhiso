@@ -355,6 +355,31 @@ exports.notifyOnUserCreated = onDocumentCreated(
 // appointment reminders) are sent outside the scheduler and do NOT consume quota.
 const PLAN_LIMITS = { starter: 1000, business: 3000, enterprise: 10000 }
 
+// Monthly limit = plan allowance + any purchased top-up messages
+function effectiveLimit(userData) {
+  return (PLAN_LIMITS[userData.plan ?? 'starter'] ?? 1000) + (userData.topupMessages ?? 0)
+}
+
+// Next run for a recurring campaign/invoice. Times are entered in SAST
+// (UTC+2) but Cloud Functions run in UTC, so we shift the hour by -2.
+function computeNextRun(rec) {
+  const [h, m] = String(rec.time || '09:00').split(':').map(Number)
+  const now  = new Date()
+  const next = new Date()
+  next.setUTCHours((h ?? 9) - 2, m ?? 0, 0, 0)
+  if (rec.freq === 'weekly') {
+    const targetDow = rec.dayOfWeek ?? 1
+    let add = (targetDow - next.getUTCDay() + 7) % 7
+    if (add === 0 && next <= now) add = 7
+    next.setUTCDate(next.getUTCDate() + add)
+  } else {
+    const dom = Math.min(rec.dayOfMonth ?? 1, 28)
+    next.setUTCDate(dom)
+    if (next <= now) next.setUTCMonth(next.getUTCMonth() + 1, dom)
+  }
+  return admin.firestore.Timestamp.fromDate(next)
+}
+
 const CONTACT_COLLECTION = {
   medical:  'patients',
   b2b:      'customers',
@@ -456,8 +481,7 @@ exports.processScheduledCampaigns = onSchedule(
         // Load user doc for plan limits
         const userSnap = await db.doc(`users/${uid}`).get()
         const userData  = userSnap.data() ?? {}
-        const planKey   = userData.plan ?? 'starter'
-        const limit     = PLAN_LIMITS[planKey] ?? 100
+        const limit     = effectiveLimit(userData)
         const used      = userData.messagesUsed ?? 0
         const remaining = limit - used
 
@@ -581,6 +605,137 @@ exports.processScheduledCampaigns = onSchedule(
         console.error(`[scheduler] error processing campaign ${campDoc.id}:`, err.message)
         // Reset to Scheduled so it will retry on the next tick
         await campDoc.ref.update({ status: 'Scheduled' }).catch(() => {})
+      }
+    }
+  }
+)
+
+// ── 7b. processRecurringCampaigns (runs every 5 minutes) ──────────────────────
+// Recurring campaign docs keep status 'Recurring' and carry
+// recurrence { freq: 'weekly'|'monthly', dayOfWeek?, dayOfMonth?, time } and a
+// nextRunAt Timestamp. Each due run sends to the (re-resolved) audience,
+// accumulates totals on the same doc, and advances nextRunAt.
+exports.processRecurringCampaigns = onSchedule(
+  {
+    schedule: 'every 5 minutes',
+    secrets: [
+      'SENDGRID_API_KEY',
+      'BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET',
+      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_WHATSAPP_NUMBER',
+    ],
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now()
+    const cfg = getConfig()
+
+    const snap = await db.collectionGroup('campaigns')
+      .where('status', '==', 'Recurring')
+      .where('nextRunAt', '<=', now)
+      .get()
+
+    if (snap.empty) return
+    console.log(`[recurring] ${snap.size} recurring campaign(s) due`)
+
+    for (const campDoc of snap.docs) {
+      const camp = campDoc.data()
+      const uid  = campDoc.ref.parent.parent?.id
+      if (!uid || !camp.recurrence) continue
+
+      // Advance nextRunAt FIRST so a crash can't double-send on the next tick
+      const nextRunAt = computeNextRun(camp.recurrence)
+      await campDoc.ref.update({ nextRunAt })
+
+      try {
+        const userSnap  = await db.doc(`users/${uid}`).get()
+        const userData  = userSnap.data() ?? {}
+        const remaining = effectiveLimit(userData) - (userData.messagesUsed ?? 0)
+        if (remaining <= 0) {
+          console.log(`[recurring] uid=${uid} quota exhausted, skipping run of ${campDoc.id}`)
+          continue
+        }
+
+        const industry = camp.industry
+        const channel  = camp.channel
+        const segDef   = camp.segmentDefinition ?? { mode: 'all', tags: [], filters: [] }
+        const body     = camp.body ?? ''
+
+        const contactCol  = CONTACT_COLLECTION[industry] ?? 'customers'
+        const contactSnap = await db.collection(`users/${uid}/${contactCol}`).get()
+        const contacts    = contactSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+        let recentApptNames = new Set()
+        if (segDef.filters?.includes('no_recent_appt')) {
+          const cutoff = new Date()
+          cutoff.setDate(cutoff.getDate() - 90)
+          const apptSnap = await db.collection(`users/${uid}/appointments`)
+            .where('date', '>=', cutoff.toISOString().slice(0, 10)).get()
+          apptSnap.docs.forEach(d => { const a = d.data(); if (a.patient) recentApptNames.add(a.patient) })
+        }
+
+        let recipients = resolveRecipients(contacts, segDef, channel, industry, recentApptNames)
+        if (recipients.length > remaining) recipients = recipients.slice(0, remaining)
+
+        let sent = 0, failed = 0
+        for (const contact of recipients) {
+          const name    = getContactName(contact, industry)
+          const msgBody = body.replace(/\{name\}/gi, name)
+          try {
+            if (channel === 'email') {
+              const emailHtml = resolveScheduledEmailBody(msgBody, camp.emailMode)
+              const tracked   = injectCampaignTracking(emailHtml, uid, campDoc.id, contact.id, camp.emailMode)
+              sgMail.setApiKey(cfg.sendgridKey)
+              await sgMail.send({
+                to: contact.email,
+                from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+                subject: camp.subject || 'Message from your service',
+                html: tracked,
+              })
+            } else if (channel === 'sms') {
+              await axios.post(
+                'https://api.bulksms.com/v1/messages',
+                [{ to: normPhone(contact.phone), body: msgBody }],
+                { auth: { username: cfg.bulksmsTokenId, password: cfg.bulksmsTokenSecret } }
+              )
+            } else if (channel === 'whatsapp') {
+              const client = twilio(cfg.twilioSid, cfg.twilioToken)
+              await client.messages.create({
+                from: cfg.twilioWhatsapp,
+                to: `whatsapp:${normPhone(contact.phone)}`,
+                body: msgBody,
+              })
+            }
+            sent++
+            db.collection(`users/${uid}/messages`).add({
+              to: channel === 'email' ? contact.email : normPhone(contact.phone),
+              type: channel, body: msgBody, status: 'sent',
+              module: 'campaigns', campaignId: campDoc.id,
+              sentAt: admin.firestore.Timestamp.now(),
+            }).catch(() => {})
+          } catch (err) {
+            failed++
+            db.collection(`users/${uid}/messages`).add({
+              to: channel === 'email' ? contact.email : normPhone(contact.phone),
+              type: channel, body: msgBody, status: 'failed',
+              module: 'campaigns', campaignId: campDoc.id,
+              sentAt: admin.firestore.Timestamp.now(),
+            }).catch(() => {})
+          }
+        }
+
+        await campDoc.ref.update({
+          sentCount:   admin.firestore.FieldValue.increment(sent),
+          failedCount: admin.firestore.FieldValue.increment(failed),
+          runCount:    admin.firestore.FieldValue.increment(1),
+          lastRunAt:   admin.firestore.Timestamp.now(),
+        })
+        if (sent > 0) {
+          await db.doc(`users/${uid}`).update({
+            messagesUsed: admin.firestore.FieldValue.increment(sent),
+          })
+        }
+        console.log(`[recurring] ${campDoc.id} run complete (${sent} sent, ${failed} failed)`)
+      } catch (err) {
+        console.error(`[recurring] error on ${campDoc.id}:`, err.message)
       }
     }
   }
@@ -748,6 +903,39 @@ exports.payfastIPN = onRequest({
 
   if (!uid) { res.status(400).send('Missing m_payment_id'); return }
 
+  // Quota top-up purchases: m_payment_id = topup_<uid>_<bundleKey>_<timestamp>
+  if (String(uid).startsWith('topup_')) {
+    if (paymentStatus === 'COMPLETE') {
+      try {
+        const [, realUid, bundleKey] = String(uid).split('_')
+        const bundle = TOPUP_BUNDLES[bundleKey]
+        if (realUid && bundle) {
+          const dupRef = db.collection('payfast_payments').doc(String(pfPaymentId || uid))
+          const dup = await dupRef.get()
+          if (!dup.exists) {
+            await Promise.all([
+              db.doc(`users/${realUid}`).update({
+                topupMessages: admin.firestore.FieldValue.increment(bundle.messages),
+              }),
+              dupRef.set({
+                uid: realUid, type: 'topup', bundle: bundleKey,
+                messages: bundle.messages, amount: data.amount_gross ?? null,
+                at: admin.firestore.Timestamp.now(),
+              }),
+            ])
+            console.log(`payfastIPN: top-up ${bundleKey} (+${bundle.messages} msgs) for uid=${realUid}`)
+          }
+        }
+      } catch (e) {
+        console.error('payfastIPN top-up error', e.message)
+        res.status(500).send('Top-up error')
+        return
+      }
+    }
+    res.status(200).send('OK')
+    return
+  }
+
   if (paymentStatus === 'COMPLETE') {
     try {
       // Activate user
@@ -907,8 +1095,7 @@ exports.processAutomations = onSchedule(
         // Load user plan for quota check
         const userSnap  = await db.doc(`users/${uid}`).get()
         const userData  = userSnap.data() ?? {}
-        const planKey   = userData.plan ?? 'starter'
-        const limit     = PLAN_LIMITS[planKey] ?? 1000
+        const limit     = effectiveLimit(userData)
         const used      = userData.messagesUsed ?? 0
         if (used >= limit) {
           console.log(`[automations] uid=${uid} quota exhausted, skipping`)
@@ -1084,6 +1271,449 @@ exports.processAutomations = onSchedule(
         console.log(`[automations] auto=${autoDoc.id} sent=${sent}`)
       } catch (e) {
         console.error(`[automations] error processing auto=${autoDoc.id}:`, e.message)
+      }
+    }
+  }
+)
+
+// ── 12. createPayfastTopup ────────────────────────────────────────────────────
+// One-off PayFast payment that adds extra campaign messages to the user's
+// monthly quota (users/{uid}.topupMessages, consumed via effectiveLimit()).
+const TOPUP_BUNDLES = {
+  t500:  { amount: '200.00', messages: 500,  name: 'Tlhiso 500 message top-up'  },
+  t1000: { amount: '380.00', messages: 1000, name: 'Tlhiso 1,000 message top-up' },
+  t2500: { amount: '900.00', messages: 2500, name: 'Tlhiso 2,500 message top-up' },
+}
+
+exports.createPayfastTopup = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_MERCHANT_KEY', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+  const bundle = TOPUP_BUNDLES[req.data?.bundleKey]
+  if (!bundle) throw new HttpsError('invalid-argument', 'Unknown top-up bundle.')
+
+  const userSnap = await db.collection('users').doc(uid).get()
+  if (!userSnap.exists) throw new HttpsError('not-found', 'User profile not found.')
+  const user = userSnap.data()
+
+  const merchantId  = process.env.PAYFAST_MERCHANT_ID
+  const merchantKey = process.env.PAYFAST_MERCHANT_KEY
+  const passphrase  = process.env.PAYFAST_PASSPHRASE
+  const isSandbox   = merchantId === '10000100'
+  const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
+
+  const nameParts = (user.name || 'User').trim().split(/\s+/)
+  const fields = {
+    merchant_id:   merchantId,
+    merchant_key:  merchantKey,
+    return_url:    'https://tlhiso.com',
+    cancel_url:    'https://tlhiso.com',
+    notify_url:    'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
+    name_first:    nameParts[0],
+    name_last:     nameParts.slice(1).join(' ') || 'User',
+    email_address: user.email,
+    m_payment_id:  `topup_${uid}_${req.data.bundleKey}_${Date.now()}`,
+    amount:        bundle.amount,
+    item_name:     bundle.name,
+  }
+  fields.signature = pfSignature(fields, passphrase)
+
+  const body = Object.entries(fields)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+
+  try {
+    const resp = await axios.post(`https://${host}/onsite/process`, body,
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+    if (!resp.data?.uuid) throw new Error(JSON.stringify(resp.data))
+    return { uuid: resp.data.uuid, sandbox: isSandbox }
+  } catch (e) {
+    console.error('createPayfastTopup error', e.response?.data ?? e.message)
+    throw new HttpsError('internal', 'Failed to initiate payment. Please try again.')
+  }
+})
+
+// ── 13. smsInboundWebhook ─────────────────────────────────────────────────────
+// BulkSMS relays inbound replies (MO messages) here. We route each reply to
+// the Tlhiso user who most recently messaged that phone number (looked up in
+// the per-user messages log) and store it in users/{uid}/inbox. Unroutable
+// replies land in the global unrouted_inbox for the super admin.
+exports.smsInboundWebhook = onRequest({ cors: false }, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
+  try {
+    const items = Array.isArray(req.body) ? req.body : (req.body ? [req.body] : [])
+    for (const item of items) {
+      const from = normPhone(item.from || item.sender || item.msisdn)
+      const text = item.body ?? item.text ?? item.message ?? ''
+      if (!from || !text) continue
+
+      let uid = null
+      try {
+        const msgSnap = await db.collectionGroup('messages')
+          .where('to', '==', from)
+          .orderBy('sentAt', 'desc')
+          .limit(1)
+          .get()
+        if (!msgSnap.empty) uid = msgSnap.docs[0].ref.parent.parent?.id ?? null
+      } catch (e) {
+        console.error('smsInboundWebhook route lookup failed', e.message)
+      }
+
+      if (uid) {
+        await db.collection(`users/${uid}/inbox`).add({
+          from, body: text, channel: 'sms',
+          read: false, receivedAt: admin.firestore.Timestamp.now(),
+          raw: { id: item.id ?? null, to: item.to ?? null },
+        })
+      } else {
+        await db.collection('unrouted_inbox').add({
+          from, body: text, receivedAt: admin.firestore.Timestamp.now(),
+        })
+      }
+    }
+  } catch (e) {
+    console.error('smsInboundWebhook error', e.message)
+  }
+  res.status(200).send('OK')
+})
+
+// ── 14. Public booking (no auth — uid in the URL is the capability) ──────────
+const BOOKING_NAME_FIELD = { medical: 'patient', b2b: 'clientName', property: 'tenantName', retail: 'customer' }
+
+exports.getPublicBookingInfo = onCall({ cors: true }, async (req) => {
+  const { uid } = req.data ?? {}
+  if (!uid) throw new HttpsError('invalid-argument', 'Missing uid')
+  const snap = await db.doc(`users/${uid}`).get()
+  const u = snap.data()
+  if (!u || u.isActive !== true) throw new HttpsError('not-found', 'Booking page not available.')
+  return {
+    businessName: u.businessName || u.name || 'Business',
+    industry:     u.industry || 'retail',
+    logoUrl:      u.businessLogoUrl || u.profilePhotoUrl || null,
+  }
+})
+
+exports.getPublicBookingSlots = onCall({ cors: true }, async (req) => {
+  const { uid, date } = req.data ?? {}
+  if (!uid || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    throw new HttpsError('invalid-argument', 'Missing uid or date')
+  }
+  const snap = await db.collection(`users/${uid}/appointments`).where('date', '==', date).get()
+  const taken = snap.docs
+    .map(d => d.data())
+    .filter(a => (a.status || '').toLowerCase() !== 'cancelled')
+    .map(a => a.time)
+    .filter(Boolean)
+  return { taken }
+})
+
+exports.createPublicBooking = onCall({
+  cors: true,
+  secrets: ['BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET', 'SENDGRID_API_KEY'],
+}, async (req) => {
+  const { uid, name, phone, email, date, time, service, notes } = req.data ?? {}
+  if (!uid || !name?.trim() || !phone?.trim() || !date || !time) {
+    throw new HttpsError('invalid-argument', 'Please fill in your name, phone, date and time.')
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+    throw new HttpsError('invalid-argument', 'Invalid date or time.')
+  }
+  const userSnap = await db.doc(`users/${uid}`).get()
+  const owner = userSnap.data()
+  if (!owner || owner.isActive !== true) throw new HttpsError('not-found', 'Booking page not available.')
+
+  // Conflict check
+  const clash = await db.collection(`users/${uid}/appointments`)
+    .where('date', '==', date).where('time', '==', time).get()
+  if (clash.docs.some(d => (d.data().status || '').toLowerCase() !== 'cancelled')) {
+    throw new HttpsError('already-exists', 'That time slot has just been taken — please pick another.')
+  }
+
+  const nameField = BOOKING_NAME_FIELD[owner.industry] ?? 'customer'
+  const cleanName = String(name).trim().slice(0, 120)
+  const cleanPhone = normPhone(phone)
+  const apptRef = await db.collection(`users/${uid}/appointments`).add({
+    [nameField]: cleanName,
+    name:    cleanName,
+    phone:   cleanPhone,
+    email:   String(email || '').trim().slice(0, 160) || null,
+    date, time,
+    service: String(service || '').trim().slice(0, 160) || null,
+    reason:  String(service || '').trim().slice(0, 160) || null,
+    notes:   String(notes || '').trim().slice(0, 500) || null,
+    status:  'pending',
+    source:  'public-booking',
+    createdAt: admin.firestore.Timestamp.now(),
+  })
+
+  const cfg = getConfig()
+  const bizName = owner.businessName || owner.name || 'the business'
+
+  // Confirmation SMS to the customer (operational — not counted against quota)
+  if (cleanPhone) {
+    try {
+      await axios.post('https://api.bulksms.com/v1/messages',
+        [{ to: cleanPhone, body: `Hi ${cleanName.split(' ')[0]}, your booking request with ${bizName} for ${date} at ${time} has been received. You'll get a confirmation soon.` }],
+        { auth: { username: cfg.bulksmsTokenId, password: cfg.bulksmsTokenSecret } })
+    } catch (e) { console.error('createPublicBooking sms error', e.message) }
+  }
+
+  // Notify the business owner
+  if (owner.email) {
+    try {
+      sgMail.setApiKey(cfg.sendgridKey)
+      await sgMail.send({
+        to: owner.email,
+        from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+        subject: `New booking request — ${cleanName} on ${date} at ${time}`,
+        html: `<p><strong>${cleanName}</strong> requested a booking via your public booking page.</p>
+          <p>Date: <strong>${date}</strong> at <strong>${time}</strong><br>
+          Phone: ${cleanPhone}${email ? `<br>Email: ${email}` : ''}${service ? `<br>Service: ${service}` : ''}${notes ? `<br>Notes: ${notes}` : ''}</p>
+          <p><a href="https://tlhiso.com/${owner.industry}/appointments" style="background:#5B8E7D;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none">Review in Tlhiso</a></p>`,
+      })
+    } catch (e) { console.error('createPublicBooking owner email error', e.message) }
+  }
+
+  return { success: true, id: apptRef.id }
+})
+
+// ── 15. Tenant portal (token = base64 { uid, id }) ───────────────────────────
+function decodeTenantToken(token) {
+  let uid, id
+  try {
+    const d = JSON.parse(Buffer.from(String(token), 'base64').toString('utf8'))
+    uid = d.uid; id = d.id
+  } catch { throw new HttpsError('invalid-argument', 'Invalid link.') }
+  if (!uid || !id) throw new HttpsError('invalid-argument', 'Invalid link.')
+  return { uid, id }
+}
+
+exports.getTenantPortal = onCall({ cors: true }, async (req) => {
+  const { uid, id } = decodeTenantToken(req.data?.token)
+  const tenantSnap = await db.doc(`users/${uid}/tenants/${id}`).get()
+  if (!tenantSnap.exists) throw new HttpsError('not-found', 'Tenant not found.')
+  const t = tenantSnap.data()
+
+  const ownerSnap = await db.doc(`users/${uid}`).get()
+  const owner = ownerSnap.data() ?? {}
+
+  const [invSnap, maintSnap] = await Promise.all([
+    db.collection(`users/${uid}/invoices`).where('tenantId', '==', id).get(),
+    db.collection(`users/${uid}/maintenance`).where('tenantId', '==', id).get(),
+  ])
+
+  const sortByCreated = (a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
+  const invoices = invSnap.docs.map(d => {
+    const v = d.data()
+    return {
+      id: d.id, invoiceNumber: v.invoiceNumber ?? null, total: v.total ?? null,
+      status: v.status ?? 'Draft', dueDate: v.dueDate ?? null, issueDate: v.issueDate ?? null,
+      createdAt: v.createdAt ?? null,
+    }
+  }).sort(sortByCreated).slice(0, 12)
+  const maintenance = maintSnap.docs.map(d => {
+    const v = d.data()
+    return {
+      id: d.id, title: v.title ?? v.description ?? '', status: v.status ?? 'Open',
+      priority: v.priority ?? 'Normal', createdAt: v.createdAt ?? null,
+    }
+  }).sort(sortByCreated).slice(0, 12)
+
+  return {
+    tenant: {
+      name: t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Tenant',
+      property: t.property || t.propertyName || null,
+      unit: t.unit || null,
+      rentAmount: t.rentAmount ?? null,
+      leaseStart: t.leaseStart ?? null,
+      leaseEnd: t.leaseEnd ?? null,
+      status: t.status ?? null,
+    },
+    agency: { name: owner.businessName || owner.name || 'Your property manager' },
+    invoices,
+    maintenance,
+  }
+})
+
+exports.createTenantMaintenance = onCall({
+  cors: true,
+  secrets: ['SENDGRID_API_KEY'],
+}, async (req) => {
+  const { uid, id } = decodeTenantToken(req.data?.token)
+  const { title, description, priority } = req.data ?? {}
+  if (!title?.trim()) throw new HttpsError('invalid-argument', 'Please describe the issue.')
+
+  const tenantSnap = await db.doc(`users/${uid}/tenants/${id}`).get()
+  if (!tenantSnap.exists) throw new HttpsError('not-found', 'Tenant not found.')
+  const t = tenantSnap.data()
+  const tenantName = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Tenant'
+
+  await db.collection(`users/${uid}/maintenance`).add({
+    title:       String(title).trim().slice(0, 160),
+    description: String(description || '').trim().slice(0, 1000),
+    priority:    ['Low', 'Medium', 'High', 'Urgent'].includes(priority) ? priority : 'Medium',
+    status:      'Open',
+    tenant:      tenantName,
+    tenantId:    id,
+    property:    t.property || t.propertyName || null,
+    source:      'tenant-portal',
+    createdAt:   admin.firestore.Timestamp.now(),
+  })
+
+  // Notify the property manager
+  try {
+    const ownerSnap = await db.doc(`users/${uid}`).get()
+    const owner = ownerSnap.data()
+    if (owner?.email) {
+      const cfg = getConfig()
+      sgMail.setApiKey(cfg.sendgridKey)
+      await sgMail.send({
+        to: owner.email,
+        from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+        subject: `New maintenance request from ${tenantName}`,
+        html: `<p><strong>${tenantName}</strong> logged a maintenance request via the tenant portal.</p>
+          <p><strong>${String(title).trim()}</strong>${description ? `<br>${String(description).trim()}` : ''}</p>
+          <p><a href="https://tlhiso.com/property/maintenance" style="background:#5B8E7D;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none">View in Tlhiso</a></p>`,
+      })
+    }
+  } catch (e) { console.error('createTenantMaintenance notify error', e.message) }
+
+  return { success: true }
+})
+
+// ── 16. processBilling (daily, 06:00 UTC ≈ 08:00 SAST) ───────────────────────
+// a) Recurring invoices: templates with recurring=true and nextRunAt due get a
+//    fresh invoice generated (and optionally emailed to the client).
+// b) Monthly statements: on the 1st, users with autoStatements=true get a
+//    summary of open invoices emailed to each client that owes.
+exports.processBilling = onSchedule(
+  {
+    schedule: '0 6 * * *',
+    secrets: ['SENDGRID_API_KEY'],
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now()
+    const cfg = getConfig()
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const fmtR = n => `R ${Number(n ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`
+
+    // ── a) Recurring invoices ────────────────────────────────────────────────
+    const recSnap = await db.collectionGroup('invoices')
+      .where('recurring', '==', true)
+      .where('nextRunAt', '<=', now)
+      .get()
+
+    for (const tplDoc of recSnap.docs) {
+      const tpl = tplDoc.data()
+      const uid = tplDoc.ref.parent.parent?.id
+      if (!uid) continue
+      // Advance first to avoid double-generation
+      await tplDoc.ref.update({
+        nextRunAt: computeNextRun({ freq: 'monthly', dayOfMonth: tpl.recurringDay ?? 1, time: '08:00' }),
+        lastRunAt: now,
+      })
+      try {
+        const countSnap = await db.collection(`users/${uid}/invoices`).count().get()
+        const invoiceNumber = `INV-${new Date().getFullYear()}-${String(countSnap.data().count + 1).padStart(3, '0')}`
+        const due = new Date(); due.setDate(due.getDate() + (tpl.dueDays ?? 14))
+        const newInv = {
+          invoiceNumber,
+          client:    tpl.client ?? '',
+          clientId:  tpl.clientId ?? null,
+          tenantId:  tpl.tenantId ?? null,
+          items:     tpl.items ?? [],
+          total:     tpl.total ?? 0,
+          vat:       tpl.vat ?? 0,
+          notes:     tpl.notes ?? '',
+          issueDate: todayStr,
+          dueDate:   due.toISOString().slice(0, 10),
+          status:    'Draft',
+          fromRecurringId: tplDoc.id,
+          createdAt: now,
+        }
+        const newRef = await db.collection(`users/${uid}/invoices`).add(newInv)
+
+        // Optional auto-email to the client
+        if (tpl.autoEmail && tpl.clientId) {
+          const clientSnap = await db.doc(`users/${uid}/customers/${tpl.clientId}`).get()
+          const clientEmail = clientSnap.data()?.email
+          const ownerSnap = await db.doc(`users/${uid}`).get()
+          const bizName = ownerSnap.data()?.businessName || ownerSnap.data()?.name || 'Tlhiso'
+          if (clientEmail) {
+            const rows = (newInv.items || []).map(i =>
+              `<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">${i.desc || ''}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtR(Number(i.qty || 1) * Number(i.price ?? i.unitPrice ?? 0))}</td></tr>`).join('')
+            sgMail.setApiKey(cfg.sendgridKey)
+            await sgMail.send({
+              to: clientEmail,
+              from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+              subject: `Invoice ${invoiceNumber} from ${bizName}`,
+              html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+                <h2 style="color:#5B8E7D">Invoice ${invoiceNumber}</h2>
+                <p>Hi ${newInv.client || 'there'},</p>
+                <p>Please find your monthly invoice below, due <strong>${newInv.dueDate}</strong>.</p>
+                <table style="width:100%;border-collapse:collapse;font-size:13px">${rows}</table>
+                <p style="text-align:right;font-size:15px;margin-top:12px">Total (incl. VAT): <strong style="color:#5B8E7D">${fmtR(newInv.total)}</strong></p>
+                <p style="font-size:12px;color:#94a3b8">Sent via Tlhiso</p></div>`,
+            })
+            await newRef.update({ status: 'Sent' })
+          }
+        }
+        console.log(`[billing] recurring invoice ${invoiceNumber} generated for uid=${uid}`)
+      } catch (e) {
+        console.error(`[billing] recurring invoice error tpl=${tplDoc.id}:`, e.message)
+      }
+    }
+
+    // ── b) Monthly statements (1st of the month) ─────────────────────────────
+    if (new Date().getUTCDate() !== 1) return
+    const usersSnap = await db.collection('users').where('autoStatements', '==', true).get()
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id
+      const owner = userDoc.data()
+      try {
+        const invSnap = await db.collection(`users/${uid}/invoices`).get()
+        const open = invSnap.docs.map(d => d.data())
+          .filter(i => i.status === 'Sent' || i.status === 'Overdue')
+        if (open.length === 0) continue
+
+        // Group open invoices by client
+        const byClient = {}
+        open.forEach(i => {
+          const key = i.clientId || i.client || 'unknown'
+          ;(byClient[key] = byClient[key] || []).push(i)
+        })
+
+        const bizName = owner.businessName || owner.name || 'Tlhiso'
+        for (const [clientKey, invs] of Object.entries(byClient)) {
+          let clientEmail = null, clientName = invs[0].client || 'Client'
+          if (invs[0].clientId) {
+            const cSnap = await db.doc(`users/${uid}/customers/${invs[0].clientId}`).get()
+            clientEmail = cSnap.data()?.email ?? null
+          }
+          if (!clientEmail) continue
+          const totalDue = invs.reduce((s, i) => s + Number(i.total ?? 0), 0)
+          const rows = invs.map(i =>
+            `<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">${i.invoiceNumber || '—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee">${i.dueDate || '—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${fmtR(i.total)}</td></tr>`).join('')
+          sgMail.setApiKey(cfg.sendgridKey)
+          await sgMail.send({
+            to: clientEmail,
+            from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+            subject: `Statement from ${bizName} — ${fmtR(totalDue)} outstanding`,
+            html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+              <h2 style="color:#5B8E7D">Monthly Statement</h2>
+              <p>Hi ${clientName},</p>
+              <p>Here is a summary of your open invoices with ${bizName}:</p>
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <tr style="background:#f8fafc"><th style="padding:6px 10px;text-align:left">Invoice</th><th style="padding:6px 10px;text-align:left">Due</th><th style="padding:6px 10px;text-align:right">Amount</th></tr>
+                ${rows}</table>
+              <p style="text-align:right;font-size:15px;margin-top:12px">Total outstanding: <strong style="color:#5B8E7D">${fmtR(totalDue)}</strong></p>
+              <p style="font-size:12px;color:#94a3b8">Sent via Tlhiso</p></div>`,
+          })
+        }
+        console.log(`[billing] statements sent for uid=${uid} (${Object.keys(byClient).length} clients)`)
+      } catch (e) {
+        console.error(`[billing] statements error uid=${uid}:`, e.message)
       }
     }
   }

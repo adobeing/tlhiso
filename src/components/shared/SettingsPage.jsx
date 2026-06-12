@@ -9,6 +9,7 @@ import {
   User, Shield, Bell, CreditCard, Trash2, LogOut,
   AlertTriangle, CheckCircle, Mail, Lock, ChevronRight,
   Loader2, HelpCircle, ChevronDown, ShieldCheck, Settings2,
+  Copy, ExternalLink, CalendarDays, FileText,
 } from 'lucide-react'
 import PopiaModule from './PopiaModule'
 
@@ -168,6 +169,7 @@ export default function SettingsPage({ industry }) {
   const [deleting,    setDeleting]    = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [activeTab,   setActiveTab]   = useState('settings')
+  const [linkCopied,  setLinkCopied]  = useState(false)
 
   const subCollection = { medical: 'patients', property: 'tenants' }[industry] ?? 'customers'
 
@@ -243,6 +245,64 @@ export default function SettingsPage({ industry }) {
 
       {/* ── Settings tab ────────────────────────────────────────────────── */}
       {activeTab === 'settings' && <>
+
+      {/* ── Public booking link ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-primary-light/60 px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-white">
+            <CalendarDays size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-ink">Public booking link</p>
+            <p className="truncate text-xs text-ink-secondary">
+              {`https://tlhiso.com/book/${uid ?? ''}`} — share it so customers can book themselves in
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(`https://tlhiso.com/book/${uid}`)
+              setLinkCopied(true)
+              setTimeout(() => setLinkCopied(false), 2000)
+            }}
+            className="flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#4e7d6d]">
+            {linkCopied ? <CheckCircle size={13} /> : <Copy size={13} />}
+            {linkCopied ? 'Copied!' : 'Copy link'}
+          </button>
+          <a href={`/book/${uid}`} target="_blank" rel="noreferrer"
+            className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-white px-3.5 py-2 text-xs font-bold text-primary transition hover:bg-primary/5">
+            <ExternalLink size={13} /> Preview
+          </a>
+        </div>
+      </div>
+
+      {/* ── Monthly auto-statements (B2B) ────────────────────────────────── */}
+      {industry === 'b2b' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-white px-5 py-4 shadow-sm">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-light text-primary">
+              <FileText size={16} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-ink">Monthly auto-statements</p>
+              <p className="text-xs text-ink-secondary">
+                On the 1st of each month, email every client a summary of their open invoices.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => toggle('autoStatements', profile?.autoStatements === true)}
+            disabled={saving === 'autoStatements'}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+              profile?.autoStatements === true ? 'bg-primary' : 'bg-slate-300'
+            }`}>
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+              profile?.autoStatements === true ? 'left-[22px]' : 'left-0.5'
+            }`} />
+          </button>
+        </div>
+      )}
 
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-gradient-to-br from-primary-light/50 to-surface-2 px-6 py-5">

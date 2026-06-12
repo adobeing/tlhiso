@@ -38,6 +38,7 @@ import {
   CheckCircle, Loader2, Tag, Filter, X, Clock, AlertTriangle, Calendar,
   Upload, Eye, EyeOff, Monitor, Smartphone, Code, FileText, ChevronDown, ChevronRight, Star,
   MousePointer, TrendingUp, ArrowLeft, Layers, Copy, BookmarkPlus, Trash2, Save,
+  Repeat, Pause, Play, CreditCard, Bookmark,
 } from 'lucide-react'
 import { PLANS } from '../../utils/industries'
 import { shortenUrl } from '../../utils/shorten'
@@ -535,7 +536,17 @@ const STATUS_STYLES = {
   Scheduled:     'bg-blue-100 text-blue-600',
   Sending:       'bg-purple-100 text-purple-600',
   QuotaExceeded: 'bg-red-100 text-red-600',
+  Recurring:     'bg-indigo-100 text-indigo-600',
+  Paused:        'bg-slate-200 text-slate-600',
 }
+
+const TOPUP_BUNDLES = [
+  { key: 't500',  messages: 500,  price: 200 },
+  { key: 't1000', messages: 1000, price: 380 },
+  { key: 't2500', messages: 2500, price: 900 },
+]
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 const CHANNEL_META = {
   sms:   { label: 'SMS',   icon: PhoneIcon, color: 'text-blue-600',    description: 'Text message directly to mobile numbers' },
@@ -555,6 +566,7 @@ export default function CampaignsModule({ industry }) {
   const campaigns    = useCollection(uid ? `users/${uid}/campaigns` : null)
   const appointments = useCollection(uid ? `users/${uid}/appointments` : null)
   const myTemplates  = useCollection(uid ? `users/${uid}/emailTemplates` : null)
+  const audiences    = useCollection(uid ? `users/${uid}/audiences` : null)
 
   // View state: 'list' | 'wizard'
   const [view,        setView]        = useState('list')
@@ -570,6 +582,16 @@ export default function CampaignsModule({ industry }) {
   const [editingDraftId, setEditingDraftId] = useState(null)
   const [savingDraft,    setSavingDraft]    = useState(false)
   const [savingTemplate, setSavingTemplate] = useState(false)
+  const [savingAudience, setSavingAudience] = useState(false)
+
+  // Recurring send config
+  const [recurFreq, setRecurFreq] = useState('weekly')   // 'weekly' | 'monthly'
+  const [recurDay,  setRecurDay]  = useState(1)          // dayOfWeek (0-6) or dayOfMonth (1-28)
+  const [recurTime, setRecurTime] = useState('09:00')
+
+  // Quota top-up purchase
+  const [topupOpen,   setTopupOpen]   = useState(false)
+  const [topupBuying, setTopupBuying] = useState(null)
 
   // Review-request modal state
   const [reviewModal,   setReviewModal]   = useState(false)
@@ -671,7 +693,7 @@ export default function CampaignsModule({ industry }) {
 
   // ── Quota helpers ─────────────────────────────────────────────────────────
   const planKey   = profile?.plan ?? 'starter'
-  const planLimit = PLANS[planKey]?.messages ?? 100
+  const planLimit = (PLANS[planKey]?.messages ?? 100) + (profile?.topupMessages ?? 0)
   const used      = profile?.messagesUsed ?? 0
   const remaining = planLimit - used
 
@@ -819,6 +841,9 @@ export default function CampaignsModule({ industry }) {
     setTestSent(null)
     setUnlayerReady(false)
     setEditingDraftId(null)
+    setRecurFreq('weekly')
+    setRecurDay(1)
+    setRecurTime('09:00')
     setStep(1)
     setView('wizard')
   }
@@ -890,6 +915,115 @@ export default function CampaignsModule({ industry }) {
       alert('Failed to save template: ' + e.message)
     } finally {
       setSavingTemplate(false)
+    }
+  }
+
+  // ── Saved audiences ────────────────────────────────────────────────────────
+  async function saveAudience() {
+    if (sendTo.mode === 'all' || savingAudience) return
+    const name = window.prompt('Audience name (e.g. "Lapsed patients"):')
+    if (!name?.trim()) return
+    setSavingAudience(true)
+    try {
+      await addDoc(collection(db, 'users', uid, 'audiences'), {
+        name: name.trim(),
+        mode: sendTo.mode,
+        tags: sendTo.tags,
+        filters: sendTo.filters,
+        createdAt: serverTimestamp(),
+      })
+    } catch (e) {
+      alert('Failed to save audience: ' + e.message)
+    } finally {
+      setSavingAudience(false)
+    }
+  }
+
+  function applyAudience(a) {
+    setSendTo({ mode: a.mode ?? 'all', tags: a.tags ?? [], filters: a.filters ?? [] })
+  }
+
+  // ── Recurring schedule ─────────────────────────────────────────────────────
+  // First-run time computed in the browser (SAST); the Cloud Function keeps
+  // subsequent runs aligned.
+  function computeFirstRun() {
+    const [h, m] = String(recurTime || '09:00').split(':').map(Number)
+    const now = new Date()
+    const next = new Date()
+    next.setHours(h ?? 9, m ?? 0, 0, 0)
+    if (recurFreq === 'weekly') {
+      let add = ((Number(recurDay) || 0) - next.getDay() + 7) % 7
+      if (add === 0 && next <= now) add = 7
+      next.setDate(next.getDate() + add)
+    } else {
+      next.setDate(Math.min(Number(recurDay) || 1, 28))
+      if (next <= now) next.setMonth(next.getMonth() + 1)
+    }
+    return next
+  }
+
+  async function startRecurring() {
+    const hasContent = emailMode === 'unlayer' ? unlayerReady : body.trim()
+    if (!uid || !hasContent || recipients.length === 0) return
+
+    let emailHtml = null
+    if (channel === 'email' && emailMode === 'unlayer' && emailEditorRef.current?.editor) {
+      emailHtml = await new Promise(res =>
+        emailEditorRef.current.editor.exportHtml(({ html }) => res(html))
+      )
+    }
+
+    const recurrence = {
+      freq: recurFreq,
+      time: recurTime,
+      ...(recurFreq === 'weekly'
+        ? { dayOfWeek: Number(recurDay) }
+        : { dayOfMonth: Number(recurDay) }),
+    }
+    const payload = {
+      ...baseCampaignPayload(emailHtml),
+      status:     'Recurring',
+      recurrence,
+      nextRunAt:  Timestamp.fromDate(computeFirstRun()),
+    }
+    if (editingDraftId) {
+      const { createdAt, ...rest } = payload
+      await updateDoc(doc(db, 'users', uid, 'campaigns', editingDraftId), rest)
+    } else {
+      await addDoc(collection(db, 'users', uid, 'campaigns'), payload)
+    }
+    setScheduled(true)
+  }
+
+  // ── Quota top-up via PayFast ───────────────────────────────────────────────
+  function loadPayfastSdk() {
+    return new Promise((resolve, reject) => {
+      if (window.payfast_do_onsite_payment) return resolve()
+      const s = document.createElement('script')
+      s.src = 'https://www.payfast.co.za/onsite/engine.js'
+      s.onload = resolve
+      s.onerror = () => reject(new Error('Could not load the payment SDK.'))
+      document.head.appendChild(s)
+    })
+  }
+
+  async function buyTopup(bundleKey) {
+    setTopupBuying(bundleKey)
+    try {
+      await loadPayfastSdk()
+      const res = await httpsCallable(functions, 'createPayfastTopup')({ bundleKey })
+      const { uuid } = res.data ?? {}
+      if (!uuid) throw new Error('No payment session returned.')
+      window.payfast_do_onsite_payment({ uuid }, success => {
+        setTopupBuying(null)
+        if (success) {
+          setTopupOpen(false)
+          alert('Top-up payment received! Your extra messages will reflect within a minute.')
+        }
+      })
+    } catch (e) {
+      alert('Could not start payment: ' + e.message)
+      setTopupBuying(null)
     }
   }
 
@@ -1235,14 +1369,43 @@ export default function CampaignsModule({ industry }) {
     {
       key: 'status', label: 'Status',
       render: r => (
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLES[r.status] ?? STATUS_STYLES.Draft}`}>
-          {r.status || 'Draft'}
-        </span>
+        <div className="flex items-center gap-1.5" onClick={e => (r.status === 'Recurring' || r.status === 'Paused') && e.stopPropagation()}>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLES[r.status] ?? STATUS_STYLES.Draft}`}>
+            {r.status || 'Draft'}
+          </span>
+          {r.status === 'Recurring' && (
+            <button title="Pause recurring campaign"
+              onClick={() => updateDoc(doc(db, 'users', uid, 'campaigns', r.id), { status: 'Paused' })}
+              className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+              <Pause size={12} />
+            </button>
+          )}
+          {r.status === 'Paused' && (
+            <button title="Resume recurring campaign"
+              onClick={() => updateDoc(doc(db, 'users', uid, 'campaigns', r.id), { status: 'Recurring' })}
+              className="rounded p-1 text-indigo-400 transition hover:bg-indigo-50 hover:text-indigo-600">
+              <Play size={12} />
+            </button>
+          )}
+        </div>
       ),
     },
     {
       key: 'createdAt', label: 'Date',
       render: r => {
+        if ((r.status === 'Recurring' || r.status === 'Paused') && r.nextRunAt) {
+          const d = r.nextRunAt.toDate?.()
+          return (
+            <div>
+              <p className="text-xs font-semibold text-indigo-600">
+                {r.status === 'Paused' ? 'Paused' : `Next: ${d?.toLocaleDateString('en-ZA') ?? '—'}`}
+              </p>
+              <p className="text-[11px] text-ink-secondary">
+                {r.runCount ? `${r.runCount} run${r.runCount !== 1 ? 's' : ''} so far` : 'no runs yet'}
+              </p>
+            </div>
+          )
+        }
         if (r.status === 'Scheduled' && r.scheduledFor) {
           const d = r.scheduledFor.toDate?.()
           return (
@@ -1668,6 +1831,32 @@ export default function CampaignsModule({ industry }) {
             <p className="mt-2 text-sm text-slate-500">Select the segment of your {config.contactLabel.toLowerCase()}s to reach.</p>
           </div>
           <div className="space-y-4">
+            {/* Saved audiences */}
+            {audiences.length > 0 && (
+              <div className="rounded-3xl border border-slate-200/60 bg-white p-5 shadow-sm">
+                <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Saved audiences</p>
+                <div className="flex flex-wrap gap-2">
+                  {audiences.map(a => (
+                    <span key={a.id} className="flex items-center overflow-hidden rounded-xl border border-slate-200">
+                      <button type="button" onClick={() => applyAudience(a)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-primary/5 hover:text-primary">
+                        <Bookmark size={12} /> {a.name}
+                      </button>
+                      <button type="button" title="Delete audience"
+                        onClick={() => {
+                          if (window.confirm(`Delete audience "${a.name}"?`)) {
+                            deleteDoc(doc(db, 'users', uid, 'audiences', a.id))
+                          }
+                        }}
+                        className="border-l border-slate-200 px-1.5 py-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-500">
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Mode tabs */}
             <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
               <div className="flex border-b border-slate-200">
@@ -1762,6 +1951,13 @@ export default function CampaignsModule({ industry }) {
               </div>
             </div>
           </div>
+          {sendTo.mode !== 'all' && step2Ready && (
+            <button type="button" onClick={saveAudience} disabled={savingAudience}
+              className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-primary transition hover:underline disabled:opacity-50">
+              {savingAudience ? <Loader2 size={12} className="animate-spin" /> : <Bookmark size={12} />}
+              Save this audience for reuse
+            </button>
+          )}
           <div className="mt-8 flex items-center justify-between">
             <button onClick={() => setStep(1)}
               className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:border-primary hover:text-primary">
@@ -2033,11 +2229,22 @@ export default function CampaignsModule({ industry }) {
                 <Clock size={40} className="text-blue-600" />
               </div>
               <div>
-                <h2 className="text-2xl font-black text-slate-900">Campaign Scheduled!</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Will send to <strong>{recipients.length}</strong> {config.contactLabel.toLowerCase()}{recipients.length !== 1 ? 's' : ''} on{' '}
-                  <strong className="text-slate-700">{scheduledDate} at {scheduledTime}</strong>.
-                </p>
+                <h2 className="text-2xl font-black text-slate-900">
+                  {sendMode === 'recurring' ? 'Recurring Campaign Active!' : 'Campaign Scheduled!'}
+                </h2>
+                {sendMode === 'recurring' ? (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Will send to your selected audience{' '}
+                    <strong className="text-slate-700">
+                      every {recurFreq === 'weekly' ? WEEKDAYS[Number(recurDay)] : `month on the ${recurDay}th`} at {recurTime}
+                    </strong>. Pause any time from Campaign History.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Will send to <strong>{recipients.length}</strong> {config.contactLabel.toLowerCase()}{recipients.length !== 1 ? 's' : ''} on{' '}
+                    <strong className="text-slate-700">{scheduledDate} at {scheduledTime}</strong>.
+                  </p>
+                )}
                 <p className="mt-1 text-xs text-slate-400">Sent automatically within 5 minutes of the scheduled time.</p>
               </div>
               <button onClick={closeModal}
@@ -2171,7 +2378,7 @@ export default function CampaignsModule({ industry }) {
                 <div className="rounded-3xl border border-slate-200/60 bg-white p-5 shadow-sm space-y-3">
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-400">When to send</p>
                   <div className="flex overflow-hidden rounded-2xl border border-slate-200">
-                    {[{ key: 'now', label: 'Send now', icon: Send }, { key: 'later', label: 'Schedule', icon: Clock }].map(m => {
+                    {[{ key: 'now', label: 'Send now', icon: Send }, { key: 'later', label: 'Schedule', icon: Clock }, { key: 'recurring', label: 'Repeat', icon: Repeat }].map(m => {
                       const Icon = m.icon; const active = sendMode === m.key
                       return (
                         <button key={m.key} type="button" onClick={() => { setSendMode(m.key); setQuotaError(null) }}
@@ -2195,6 +2402,45 @@ export default function CampaignsModule({ industry }) {
                           onChange={e => { setScheduledTime(e.target.value); setQuotaError(null) }}
                           className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
                       </label>
+                    </div>
+                  )}
+                  {sendMode === 'recurring' && (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold text-slate-500">Frequency</span>
+                        <select value={recurFreq}
+                          onChange={e => { setRecurFreq(e.target.value); setRecurDay(1) }}
+                          className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+                          <option value="weekly">Every week</option>
+                          <option value="monthly">Every month</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold text-slate-500">
+                          {recurFreq === 'weekly' ? 'Day of week' : 'Day of month'}
+                        </span>
+                        {recurFreq === 'weekly' ? (
+                          <select value={recurDay} onChange={e => setRecurDay(e.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+                            {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                          </select>
+                        ) : (
+                          <select value={recurDay} onChange={e => setRecurDay(e.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20">
+                            {Array.from({ length: 28 }, (_, i) => i + 1).map(d =>
+                              <option key={d} value={d}>{d}{d === 1 ? 'st' : d === 2 ? 'nd' : d === 3 ? 'rd' : 'th'}</option>)}
+                          </select>
+                        )}
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-500"><Clock size={12} /> Time</span>
+                        <input type="time" value={recurTime} onChange={e => setRecurTime(e.target.value)}
+                          className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
+                      </label>
+                      <p className="rounded-xl bg-indigo-50 px-3 py-2 text-[11px] leading-relaxed text-indigo-700">
+                        The audience is re-checked before every run, so new contacts are included
+                        automatically. Each run uses your monthly quota. Pause any time from Campaign History.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -2222,19 +2468,28 @@ export default function CampaignsModule({ industry }) {
                   )
                 })()}
 
-                {sendMode === 'now' ? (
+                {sendMode === 'now' && (
                   <button onClick={sendNow}
                     disabled={!(emailMode === 'unlayer' ? unlayerReady : body.trim()) || recipients.length === 0}
                     className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#4e7d6d] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40">
                     <Send size={15} />
                     Send now to {recipients.length} {config.contactLabel.toLowerCase()}{recipients.length !== 1 ? 's' : ''}
                   </button>
-                ) : (
+                )}
+                {sendMode === 'later' && (
                   <button onClick={scheduleLater}
                     disabled={!(emailMode === 'unlayer' ? unlayerReady : body.trim()) || recipients.length === 0 || !scheduledDate || !scheduledTime}
                     className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-4 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40">
                     <Clock size={15} />
                     Schedule for {scheduledDate || '…'} at {scheduledTime}
+                  </button>
+                )}
+                {sendMode === 'recurring' && (
+                  <button onClick={startRecurring}
+                    disabled={!(emailMode === 'unlayer' ? unlayerReady : body.trim()) || recipients.length === 0}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 py-4 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40">
+                    <Repeat size={15} />
+                    Start {recurFreq} campaign
                   </button>
                 )}
               </div>
@@ -2300,9 +2555,39 @@ export default function CampaignsModule({ industry }) {
           <div className="shrink-0 text-right">
             <p className="text-3xl font-black tracking-tight text-slate-900">{remaining.toLocaleString('en-ZA')}</p>
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">remaining</p>
+            <button onClick={() => setTopupOpen(true)}
+              className="mt-2 flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10">
+              <CreditCard size={12} /> Top up
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Top-up modal */}
+      {topupOpen && (
+        <Modal open onClose={() => !topupBuying && setTopupOpen(false)} title="Buy extra campaign messages">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">
+              Top-ups are added to this month's quota instantly after payment and never expire mid-month.
+            </p>
+            {TOPUP_BUNDLES.map(b => (
+              <button key={b.key} onClick={() => buyTopup(b.key)} disabled={!!topupBuying}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-200 px-5 py-4 text-left transition hover:border-primary hover:bg-primary/5 disabled:opacity-50">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">{b.messages.toLocaleString('en-ZA')} messages</p>
+                  <p className="text-xs text-slate-400">R{(b.price / b.messages).toFixed(2)} per message</p>
+                </div>
+                <span className="flex items-center gap-2 text-base font-black text-primary">
+                  {topupBuying === b.key ? <Loader2 size={16} className="animate-spin" /> : `R${b.price.toLocaleString('en-ZA')}`}
+                </span>
+              </button>
+            ))}
+            <p className="text-center text-[11px] text-slate-400">
+              Secure payment by PayFast — cards, Instant EFT &amp; Google Pay.
+            </p>
+          </div>
+        </Modal>
+      )}
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 sm:gap-6">

@@ -9,6 +9,7 @@ import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
 import CampaignPromoCard from '../../shared/CampaignPromoCard'
+import InboxModule from '../../shared/InboxModule'
 import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
@@ -21,6 +22,7 @@ import {
   CreditCard, Users, Clock, ChevronLeft, ChevronRight, LayoutList, CalendarDays,
 } from 'lucide-react'
 import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer'
+import Papa from 'papaparse'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import CampaignsModule from '../../shared/CampaignsModule'
 import AutomationsModule from '../../shared/AutomationsModule'
@@ -550,6 +552,194 @@ function Overview() {
                 </div>
               ))
           }
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Recalls ───────────────────────────────────────────────────────────────────
+// Patients overdue for a visit (no appointment or consultation within the
+// selected window) with one-click recall messages, plus a medical-aid claims
+// CSV export of consultations for a date range.
+function Recalls() {
+  const { user, profile } = useAuth()
+  const uid = user?.uid
+  const patients      = useCollection(uid ? `users/${uid}/patients` : null)
+  const appointments  = useCollection(uid ? `users/${uid}/appointments` : null)
+  const consultations = useCollection(uid ? `users/${uid}/consultations` : null)
+
+  const [months,    setMonths]    = useState(6)
+  const [sendingId, setSendingId] = useState(null)
+  const [claimFrom, setClaimFrom] = useState(new Date(new Date().setDate(1)).toISOString().slice(0, 10))
+  const [claimTo,   setClaimTo]   = useState(new Date().toISOString().slice(0, 10))
+
+  const patientName = p => [p.firstName, p.lastName].filter(Boolean).join(' ')
+
+  // Last seen = most recent appointment or consultation date per patient name
+  const lastSeenByName = useMemo(() => {
+    const map = {}
+    const note = (name, date) => {
+      if (!name || !date) return
+      if (!map[name] || date > map[name]) map[name] = date
+    }
+    appointments.forEach(a => note(a.patient, a.date))
+    consultations.forEach(c => note(c.patient, c.date))
+    return map
+  }, [appointments, consultations])
+
+  const cutoff = useMemo(() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - months)
+    return d.toISOString().slice(0, 10)
+  }, [months])
+
+  const overdue = useMemo(() =>
+    patients
+      .filter(p => p.phone || p.email)
+      .filter(p => p.marketingOptOut !== true)
+      .map(p => ({ ...p, lastSeen: lastSeenByName[patientName(p)] ?? null }))
+      .filter(p => !p.lastSeen || p.lastSeen < cutoff)
+      .sort((a, b) => String(a.lastSeen ?? '').localeCompare(String(b.lastSeen ?? ''))),
+    [patients, lastSeenByName, cutoff]
+  )
+
+  async function sendRecall(p) {
+    if (sendingId) return
+    setSendingId(p.id)
+    const first = (p.firstName || patientName(p) || 'there').split(' ')[0]
+    const practice = profile?.businessName || profile?.name || 'our practice'
+    const message = `Hi ${first}, it's been a while since your last visit to ${practice}. We recommend booking a check-up — please call or reply to arrange a time that suits you.`
+    try {
+      let res, to
+      if (p.phone) {
+        to = p.phone
+        res = await httpsCallable(functions, 'sendSMS')({ to: p.phone, message })
+        if (!res.data?.success) throw new Error(res.data?.error || 'SMS send failed')
+      } else {
+        to = p.email
+        res = await httpsCallable(functions, 'sendEmail')({
+          to: p.email,
+          subject: `Time for your check-up — ${practice}`,
+          htmlBody: `<p>Hi ${first},</p><p>It's been a while since your last visit to ${practice}. Regular check-ups are an important part of staying healthy — we'd love to see you again.</p><p>Reply to this email or call us to book a time that suits you.</p>`,
+        })
+        if (!res.data?.success) throw new Error(res.data?.error || 'Email send failed')
+      }
+      await Promise.all([
+        addDoc(collection(db, 'users', uid, 'messages'), {
+          to, type: p.phone ? 'sms' : 'email', body: message,
+          module: 'recalls', status: 'sent', sentAt: serverTimestamp(),
+        }),
+        updateDoc(doc(db, 'users', uid, 'patients', p.id), { lastRecallAt: serverTimestamp() }),
+        updateDoc(doc(db, 'users', uid), { messagesUsed: increment(1) }),
+      ])
+    } catch (e) {
+      alert('Failed to send recall: ' + e.message)
+    } finally {
+      setSendingId(null)
+    }
+  }
+
+  function exportClaims() {
+    const inRange = consultations.filter(c => c.date && c.date >= claimFrom && c.date <= claimTo)
+    if (inRange.length === 0) { alert('No consultations in the selected date range.'); return }
+    const byName = {}
+    patients.forEach(p => { byName[patientName(p)] = p })
+    const rows = inRange.map(c => {
+      const p = byName[c.patient] ?? {}
+      return {
+        'Date':            c.date ?? '',
+        'Patient':         c.patient ?? '',
+        'RSA ID Number':   p.idNumber ?? '',
+        'Medical Aid':     p.medicalAid ?? '',
+        'Plan':            p.planName ?? '',
+        'Member Number':   p.memberNumber ?? '',
+        'Dependant Code':  p.dependantCode ?? '',
+        'Chief Complaint': c.chiefComplaint ?? '',
+        'ICD-10 Codes':    Array.isArray(c.icd10) ? c.icd10.map(d => d.code).filter(Boolean).join('; ') : (c.icd10 ?? ''),
+        'Practitioner':    c.practitioner ?? '',
+      }
+    })
+    const csv  = Papa.unparse(rows)
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `claims_${claimFrom}_to_${claimTo}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">Patient Recalls</h2>
+          <p className="mt-0.5 text-sm text-slate-600">
+            Patients who haven't visited recently. Recall messages count toward your campaign quota.
+          </p>
+        </div>
+        <select value={months} onChange={e => setMonths(Number(e.target.value))}
+          className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary">
+          <option value={3}>No visit in 3+ months</option>
+          <option value={6}>No visit in 6+ months</option>
+          <option value={12}>No visit in 12+ months</option>
+        </select>
+      </div>
+
+      <DataTable
+        columns={[
+          { key: 'firstName', label: 'Patient', render: r => (
+            <div>
+              <p className="text-sm font-semibold text-slate-800">{patientName(r) || '—'}</p>
+              <p className="text-xs text-slate-500">{r.phone || r.email || '—'}</p>
+            </div>
+          )},
+          { key: 'lastSeen', label: 'Last Visit', render: r =>
+            r.lastSeen
+              ? <span className="text-sm text-slate-600">{fmtDate(r.lastSeen)}</span>
+              : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Never</span> },
+          { key: 'medicalAid', label: 'Medical Aid', render: r => r.medicalAid || '—' },
+          { key: 'lastRecallAt', label: 'Last Recall', render: r =>
+            r.lastRecallAt?.toDate?.()
+              ? <span className="text-xs text-slate-500">{r.lastRecallAt.toDate().toLocaleDateString('en-ZA')}</span>
+              : <span className="text-xs text-slate-400">—</span> },
+          { key: 'actions', label: '', sortable: false, render: r => (
+            <button onClick={e => { e.stopPropagation(); sendRecall(r) }}
+              disabled={sendingId === r.id}
+              className="flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/20 disabled:opacity-40">
+              {sendingId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Bell size={12} />}
+              Send recall
+            </button>
+          )},
+        ]}
+        data={overdue}
+        emptyMessage="No patients are overdue for a visit in this window. 🎉"
+      />
+
+      {/* Medical aid claims export */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-800">Medical Aid Claims Export</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              CSV of consultations with patient medical aid details — ready for your claims submission or bureau.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-slate-400">From</span>
+              <input type="date" value={claimFrom} onChange={e => setClaimFrom(e.target.value)}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-slate-400">To</span>
+              <input type="date" value={claimTo} onChange={e => setClaimTo(e.target.value)}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" />
+            </label>
+            <button onClick={exportClaims}
+              className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#4e7d6d]">
+              <Download size={14} /> Export CSV
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -3557,6 +3747,8 @@ export default function MedicalDashboard() {
         <Route path="referrals" element={<Referrals />} />
         <Route path="surveys" element={<SurveysModule industry="medical" />} />
         <Route path="campaigns"    element={<CampaignsModule industry="medical" />} />
+        <Route path="inbox" element={<InboxModule industry="medical" />} />
+        <Route path="recalls" element={<Recalls />} />
         <Route path="automations" element={<AutomationsModule industry="medical" />} />
         <Route path="profile" element={<ProfilePage industry="medical" />} />
         <Route path="settings" element={<Settings />} />

@@ -16,11 +16,12 @@ import { httpsCallable } from 'firebase/functions'
 import {
   PlusCircle, Trash2, MapPin, Eye, Pencil, List, TrendingUp, Download, X, Loader2, Wrench,
   AlertTriangle, CheckCircle2, Clock, Bell, Users as UsersIcon, FileText, Upload,
-  MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon, Receipt, Mail,
+  MessageSquare, Calendar as CalendarIcon, Phone as PhoneIcon, Receipt, Mail, Link2,
 } from 'lucide-react'
 import CampaignsModule from '../../shared/CampaignsModule'
 import AutomationsModule from '../../shared/AutomationsModule'
 import FinanceModule from '../../shared/FinanceModule'
+import InboxModule from '../../shared/InboxModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
@@ -921,6 +922,15 @@ function Tenants() {
         <button onClick={() => handleDownloadPDF(r)} title="Download PDF" disabled={pdfing === r.id}
           className="rounded p-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
           {pdfing === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        </button>
+        <button
+          onClick={() => {
+            const token = btoa(JSON.stringify({ uid, id: r.id }))
+            navigator.clipboard?.writeText(`https://tlhiso.com/tenant?t=${token}`)
+            alert('Tenant portal link copied — share it with the tenant via SMS or email.')
+          }}
+          title="Copy tenant portal link" className="rounded p-1.5 text-indigo-500 hover:bg-indigo-50">
+          <Link2 size={14} />
         </button>
         <button onClick={() => { if (!window.confirm('Delete this tenant? This cannot be undone.')) return; deleteDoc(doc(db, 'users', uid, 'tenants', r.id)) }}
           title="Delete" className="rounded p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
@@ -2422,6 +2432,7 @@ export default function PropertyDashboard() {
         <Route path="appointments" element={<PropertyAppointments />} />
         <Route path="documents" element={<Documents />} />
         <Route path="campaigns"    element={<CampaignsModule industry="property" />} />
+        <Route path="inbox" element={<InboxModule industry="property" />} />
         <Route path="automations" element={<AutomationsModule industry="property" />} />
         <Route path="surveys"   element={<SurveysModule industry="property" />} />
         <Route path="profile"   element={<ProfilePage industry="property" />} />

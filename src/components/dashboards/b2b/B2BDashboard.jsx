@@ -7,7 +7,7 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X, FileText, Users, Receipt, ClipboardList, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, Globe, MapPin, Building2, Send, CheckCircle, Flag, Clock, LayoutGrid, List as ListIcon } from 'lucide-react'
@@ -15,6 +15,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import CampaignsModule from '../../shared/CampaignsModule'
 import AutomationsModule from '../../shared/AutomationsModule'
 import FinanceModule from '../../shared/FinanceModule'
+import InboxModule from '../../shared/InboxModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
 import CampaignPromoCard from '../../shared/CampaignPromoCard'
@@ -623,7 +624,7 @@ function Invoices() {
   const [viewing,     setViewing]     = useState(null)
   const [emailingId,  setEmailingId]  = useState(null)
   const [remindingId, setRemindingId] = useState(null)
-  const [form, setForm] = useState({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }] })
+  const [form, setForm] = useState({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }], recurring: false, autoEmail: false })
 
   const total = form.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0)
   const vat   = total * 0.15
@@ -646,12 +647,26 @@ function Invoices() {
     if (!uid) return
     const client = clients.find(c => c.id === form.clientId)
     const invoiceNumber = `INV-${new Date().getFullYear()}-${String(invoices.length + 1).padStart(3, '0')}`
+    // Recurring invoices are regenerated monthly by the processBilling function
+    let recurringFields = {}
+    if (form.recurring) {
+      const d = new Date()
+      const day = Math.min(d.getDate(), 28)
+      recurringFields = {
+        recurring:    true,
+        recurringDay: day,
+        dueDays:      14,
+        autoEmail:    !!form.autoEmail,
+        nextRunAt:    Timestamp.fromDate(new Date(d.getFullYear(), d.getMonth() + 1, day, 8, 0, 0)),
+      }
+    }
     await addDoc(collection(db, 'users', uid, 'invoices'), {
       ...form, invoiceNumber, client: client?.name ?? '', clientId: form.clientId,
       total: total + vat, vat, status: 'Draft', createdAt: serverTimestamp(),
+      ...recurringFields,
     })
     setOpen(false)
-    setForm({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }] })
+    setForm({ clientId: '', dueDate: '', notes: '', items: [{ desc: '', qty: 1, price: 0 }], recurring: false, autoEmail: false })
   }
 
   async function emailInvoice(inv) {
@@ -762,7 +777,12 @@ function Invoices() {
     { key: 'dueDate', label: 'Due Date', render: r => fmtDate(r.dueDate) },
     { key: 'status',  label: 'Status',   render: r => {
       const s = effectiveStatus(r)
-      return <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(s)}`}>{s}</span>
+      return (
+        <span className="flex items-center gap-1.5">
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(s)}`}>{s}</span>
+          {r.recurring && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-600">Monthly</span>}
+        </span>
+      )
     }},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex gap-1 items-center" onClick={e => e.stopPropagation()}>
@@ -926,6 +946,20 @@ function Invoices() {
               <div className="mt-2 flex justify-between border-t border-slate-200 pt-2"><span className="font-bold">Total</span><span className="font-bold text-primary">R{(total + vat).toFixed(2)}</span></div>
             </div>
             <Field label="Notes" textarea value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} />
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-200 px-3 py-2.5">
+              <input type="checkbox" checked={form.recurring}
+                onChange={e => setForm(f => ({ ...f, recurring: e.target.checked }))}
+                className="h-4 w-4 accent-primary" />
+              <span className="text-sm text-slate-700">Repeat this invoice monthly</span>
+            </label>
+            {form.recurring && (
+              <label className="ml-6 flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-200 px-3 py-2.5">
+                <input type="checkbox" checked={form.autoEmail}
+                  onChange={e => setForm(f => ({ ...f, autoEmail: e.target.checked }))}
+                  className="h-4 w-4 accent-primary" />
+                <span className="text-sm text-slate-700">Email each month's invoice to the client automatically</span>
+              </label>
+            )}
           </FormSection>
 
           <button onClick={save} className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#4e7d6d]">Save Invoice</button>
@@ -2025,6 +2059,7 @@ export default function B2BDashboard() {
         <Route path="surveys" element={<SurveysModule industry="b2b" />} />
         <Route path="marketing-optin" element={<MarketingOptIn />} />
         <Route path="campaigns"    element={<CampaignsModule industry="b2b" />} />
+        <Route path="inbox" element={<InboxModule industry="b2b" />} />
         <Route path="automations" element={<AutomationsModule industry="b2b" />} />
         <Route path="profile" element={<ProfilePage industry="b2b" />} />
         <Route path="settings" element={<Settings />} />
