@@ -13,7 +13,7 @@ export default function AuthShell({ title, subtitle, children, footer }) {
           }}
         />
         <Link to="/" className="relative z-10">
-          <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-9 w-auto brightness-0 invert" />
+          <img src="/tlhiso-logo-white.png" alt="Tlhiso" className="h-9 w-auto" />
         </Link>
         <div className="relative z-10">
           <p className="text-3xl font-bold leading-tight text-white">
