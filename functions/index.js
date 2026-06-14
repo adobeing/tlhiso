@@ -39,6 +39,7 @@ const getConfig = () => ({
   twilioToken: process.env.TWILIO_AUTH_TOKEN,
   twilioNumber: process.env.TWILIO_NUMBER,
   twilioWhatsapp: process.env.TWILIO_WHATSAPP_NUMBER,
+  yocoSecretKey: process.env.YOCO_SECRET_KEY,
 })
 
 // ── 1. sendEmail ──────────────────────────────────────────────────────────────
@@ -1718,6 +1719,52 @@ exports.processBilling = onSchedule(
     }
   }
 )
+
+// ── createYocoCheckout ────────────────────────────────────────────────────────
+exports.createYocoCheckout = onCall({ secrets: ['YOCO_SECRET_KEY'] }, async (req) => {
+  requireAuth(req)
+  const { planKey } = req.data
+  if (!PLAN_PRICES[planKey]) throw new HttpsError('invalid-argument', 'Invalid plan.')
+  const cfg = getConfig()
+  const projectId = process.env.GCLOUD_PROJECT || 'tlhiso'
+  const baseUrl = projectId === 'tlhiso-staging' ? 'https://tlhiso-staging.web.app' : 'https://tlhiso.web.app'
+  const amountCents = Math.round(parseFloat(PLAN_PRICES[planKey].amount) * 100)
+  try {
+    const resp = await axios.post('https://payments.yoco.com/api/checkouts', {
+      currency: 'ZAR',
+      totalAmount: amountCents,
+      successUrl: `${baseUrl}/checkout/complete`,
+      cancelUrl:  `${baseUrl}/checkout`,
+      failureUrl: `${baseUrl}/checkout`,
+      metadata:   { uid: req.auth.uid, plan: planKey },
+    }, {
+      headers: { Authorization: `Bearer ${cfg.yocoSecretKey}`, 'Content-Type': 'application/json' },
+    })
+    return { redirectUrl: resp.data.redirectUrl, id: resp.data.id }
+  } catch (e) {
+    console.error('Yoco checkout error:', e.response?.data ?? e.message)
+    throw new HttpsError('internal', e.response?.data?.errorCode ?? 'Yoco payment creation failed.')
+  }
+})
+
+// ── yocoWebhook ───────────────────────────────────────────────────────────────
+exports.yocoWebhook = onRequest(async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
+  const event = req.body
+  if (event?.type === 'payment.succeeded') {
+    const meta = event?.payload?.metadata ?? {}
+    if (meta.uid && meta.plan) {
+      try {
+        await db.collection('users').doc(meta.uid).update({
+          isActive: true, isPaid: true, status: 'active',
+          plan: meta.plan, paidAt: new Date().toISOString(), paymentMethod: 'yoco',
+        })
+        console.log(`[yoco] activated uid=${meta.uid} plan=${meta.plan}`)
+      } catch (e) { console.error('[yoco] activation error:', e.message) }
+    }
+  }
+  res.status(200).send('OK')
+})
 
 // ── getProviderStats ──────────────────────────────────────────────────────────
 // Super-admin only. Returns BulkSMS credit balance + current-month SendGrid stats.

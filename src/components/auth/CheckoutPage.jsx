@@ -55,6 +55,7 @@ export default function CheckoutPage() {
   const isComplete = location.pathname === '/checkout/complete'
 
   const [paying,          setPaying]          = useState(false)
+  const [payingYoco,      setPayingYoco]      = useState(false)
   const [error,           setError]           = useState('')
   const [sdkReady,        setSdkReady]        = useState(false)
   const [invoiceSending,   setInvoiceSending]   = useState(false)
@@ -119,6 +120,23 @@ export default function CheckoutPage() {
     } catch (e) {
       setError(e.message || 'Payment failed. Please try again.')
       setPaying(false)
+    }
+  }
+
+  // ── Yoco checkout flow ────────────────────────────────────────────────────
+  async function handleYocoPay() {
+    if (!user || !plan) return
+    setPayingYoco(true)
+    setError('')
+    try {
+      const fn = httpsCallable(functions, 'createYocoCheckout')
+      const result = await fn({ planKey: profile.plan })
+      const { redirectUrl } = result.data
+      if (!redirectUrl) throw new Error('No redirect URL returned. Please try again.')
+      window.location.href = redirectUrl
+    } catch (e) {
+      setError(e.message || 'Yoco payment failed. Please try again.')
+      setPayingYoco(false)
     }
   }
 
@@ -261,6 +279,19 @@ export default function CheckoutPage() {
             <><Loader2 size={16} className="animate-spin" /> Loading payment…</>
           ) : (
             <><GoogleIcon /> Pay with Google Pay</>
+          )}
+        </button>
+
+        {/* ── Yoco button ── */}
+        <button
+          onClick={handleYocoPay}
+          disabled={payingYoco || paying}
+          className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#1A1A2E] py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-[#16213E] disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {payingYoco ? (
+            <><Loader2 size={16} className="animate-spin" /> Redirecting to Yoco…</>
+          ) : (
+            <><CreditCard size={16} /> Pay with Yoco</>
           )}
         </button>
 
