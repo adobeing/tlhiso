@@ -213,7 +213,7 @@ export default function CheckoutPage() {
         {/* ── Yoco button ── */}
         <button
           onClick={handleYocoPay}
-          disabled={payingYoco || paying}
+          disabled={payingYoco}
           className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#1A1A2E] py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-[#16213E] disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {payingYoco ? (
