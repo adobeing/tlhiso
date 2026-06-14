@@ -1588,10 +1588,12 @@ exports.createTenantMaintenance = onCall({
 //    fresh invoice generated (and optionally emailed to the client).
 // b) Monthly statements: on the 1st, users with autoStatements=true get a
 //    summary of open invoices emailed to each client that owes.
+// c) Yoco subscription renewals: email payment link 3 days before due date;
+//    suspend accounts 7+ days overdue.
 exports.processBilling = onSchedule(
   {
     schedule: '0 6 * * *',
-    secrets: ['SENDGRID_API_KEY'],
+    secrets: ['SENDGRID_API_KEY', 'YOCO_SECRET_KEY'],
   },
   async () => {
     const now = admin.firestore.Timestamp.now()
@@ -1663,6 +1665,66 @@ exports.processBilling = onSchedule(
         console.log(`[billing] recurring invoice ${invoiceNumber} generated for uid=${uid}`)
       } catch (e) {
         console.error(`[billing] recurring invoice error tpl=${tplDoc.id}:`, e.message)
+      }
+    }
+
+    // ── c) Yoco subscription renewals (daily) ────────────────────────────────
+    const nowDate = new Date()
+    const reminderCutoff = new Date(nowDate); reminderCutoff.setDate(reminderCutoff.getDate() + 3)
+    const yocoDueSnap = await db.collection('users')
+      .where('paymentMethod', '==', 'yoco')
+      .where('isActive', '==', true)
+      .where('nextBillingAt', '<=', admin.firestore.Timestamp.fromDate(reminderCutoff))
+      .get()
+    for (const userDoc of yocoDueSnap.docs) {
+      const u = userDoc.data()
+      if (!u.email || !u.plan || !PLAN_PRICES[u.plan]) continue
+      const nextBilling = u.nextBillingAt?.toDate?.()
+      if (!nextBilling) continue
+      const daysOverdue = Math.floor((nowDate - nextBilling) / (1000 * 60 * 60 * 24))
+      if (daysOverdue > 7) {
+        await userDoc.ref.update({ isActive: false, status: 'suspended', isPaid: false })
+        console.log(`[billing] suspended yoco uid=${userDoc.id} (${daysOverdue}d overdue)`)
+        continue
+      }
+      // Skip if a reminder was already sent today
+      const lastReminder = u.lastBillingReminderAt
+      if (lastReminder) {
+        const lastStr = (lastReminder.toDate ? lastReminder.toDate() : new Date(lastReminder)).toISOString().slice(0, 10)
+        if (lastStr === nowDate.toISOString().slice(0, 10)) continue
+      }
+      try {
+        const projectId = process.env.GCLOUD_PROJECT || 'tlhiso'
+        const baseUrl = projectId === 'tlhiso-staging' ? 'https://tlhiso-staging.web.app' : 'https://tlhiso.web.app'
+        const amountCents = Math.round(parseFloat(PLAN_PRICES[u.plan].amount) * 100)
+        const yocoResp = await axios.post('https://payments.yoco.com/api/checkouts', {
+          currency: 'ZAR', amount: amountCents,
+          successUrl: `${baseUrl}/checkout/complete`,
+          cancelUrl:  `${baseUrl}/checkout`,
+          failureUrl: `${baseUrl}/checkout`,
+          metadata:   { uid: userDoc.id, plan: u.plan },
+        }, { headers: { Authorization: `Bearer ${cfg.yocoSecretKey}`, 'Content-Type': 'application/json' } })
+        const payUrl = yocoResp.data.redirectUrl
+        const planName = PLAN_PRICES[u.plan].name
+        const amount = `R${Number(PLAN_PRICES[u.plan].amount).toLocaleString('en-ZA')}`
+        const dueDateStr = nextBilling.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
+        sgMail.setApiKey(cfg.sendgridKey)
+        await sgMail.send({
+          to: u.email,
+          from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+          subject: `Your Tlhiso subscription renewal — ${amount}`,
+          html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+            <h2 style="color:#5B8E7D">Subscription Renewal</h2>
+            <p>Hi ${u.name || 'there'},</p>
+            <p>Your <strong>${planName}</strong> subscription (<strong>${amount}/month</strong>) is due on <strong>${dueDateStr}</strong>.</p>
+            <p style="margin:24px 0"><a href="${payUrl}" style="background:#5B8E7D;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">Pay ${amount} with Yoco</a></p>
+            <p style="font-size:12px;color:#94a3b8">This link expires in 24 hours. Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
+          </div>`,
+        })
+        await userDoc.ref.update({ lastBillingReminderAt: admin.firestore.FieldValue.serverTimestamp() })
+        console.log(`[billing] yoco renewal reminder sent uid=${userDoc.id}`)
+      } catch (e) {
+        console.error(`[billing] yoco renewal error uid=${userDoc.id}:`, e.message)
       }
     }
 
@@ -1755,11 +1817,14 @@ exports.yocoWebhook = onRequest(async (req, res) => {
     const meta = event?.payload?.metadata ?? {}
     if (meta.uid && meta.plan) {
       try {
+        const nextBillingAt = new Date()
+        nextBillingAt.setDate(nextBillingAt.getDate() + 30)
         await db.collection('users').doc(meta.uid).update({
           isActive: true, isPaid: true, status: 'active',
           plan: meta.plan, paidAt: new Date().toISOString(), paymentMethod: 'yoco',
+          nextBillingAt: admin.firestore.Timestamp.fromDate(nextBillingAt),
         })
-        console.log(`[yoco] activated uid=${meta.uid} plan=${meta.plan}`)
+        console.log(`[yoco] activated uid=${meta.uid} plan=${meta.plan} nextBillingAt=${nextBillingAt.toISOString()}`)
       } catch (e) { console.error('[yoco] activation error:', e.message) }
     }
   }

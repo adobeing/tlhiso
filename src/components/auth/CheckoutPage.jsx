@@ -142,6 +142,20 @@ export default function CheckoutPage() {
 
   // ── Payment success screen ─────────────────────────────────────────────────
   if (isComplete) {
+    // Wait for the Yoco webhook to activate the account — onSnapshot in AuthContext
+    // updates profile.isActive, then the useEffect above redirects to the dashboard.
+    if (!profile?.isActive) {
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-surface-2 px-6">
+          <Loader2 size={36} className="animate-spin text-primary" />
+          <p className="text-sm font-semibold text-ink">Activating your account…</p>
+          <p className="text-xs text-ink-secondary">This usually takes a few seconds.</p>
+          <p className="mt-2 text-xs text-ink-secondary">
+            Questions? <a href="mailto:hello@tlhiso.com" className="text-primary font-semibold">hello@tlhiso.com</a>
+          </p>
+        </div>
+      )
+    }
     return (
       <AuthShell title="Payment successful!" subtitle="">
         <div className="text-center">
@@ -150,15 +164,8 @@ export default function CheckoutPage() {
           </div>
           <h2 className="text-xl font-extrabold text-ink">You're all set!</h2>
           <p className="mt-2 text-sm text-ink-secondary">
-            Your subscription is active. Your account will be ready in seconds — you'll also
-            receive a confirmation email.
+            Your subscription is active — redirecting you to your dashboard now.
           </p>
-          <Link
-            to="/login"
-            className="mt-6 flex w-full items-center justify-center rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-[#4e7d6d]"
-          >
-            Go to my dashboard →
-          </Link>
           <p className="mt-4 text-xs text-ink-secondary">
             Questions? <a href="mailto:hello@tlhiso.com" className="text-primary font-semibold">hello@tlhiso.com</a>
           </p>
