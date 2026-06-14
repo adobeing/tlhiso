@@ -22,21 +22,27 @@ export function PrivateRoute() {
 }
 
 export function ActiveUserRoute() {
-  const { isAuthenticated, isActive, isSuperAdmin, loading } = useAuth()
+  const { isAuthenticated, isActive, isSuperAdmin, profile, loading } = useAuth()
   if (loading) return <Spinner label="Checking your account…" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
-  // Super admin bypasses the activation gate.
   if (!isActive && !isSuperAdmin) {
-    return <Navigate to="/pending-activation" replace />
+    const status = profile?.status
+    // Paused/suspended → show account status page; otherwise send to checkout to pay
+    if (status === 'paused' || status === 'suspended') return <Navigate to="/pending-activation" replace />
+    return <Navigate to="/checkout" replace />
   }
   return <Outlet />
 }
 
 export function IndustryRoute({ industry }) {
-  const { isAuthenticated, isActive, industry: userIndustry, isSuperAdmin, loading } = useAuth()
+  const { isAuthenticated, isActive, industry: userIndustry, isSuperAdmin, profile, loading } = useAuth()
   if (loading) return <Spinner label="Loading your workspace…" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!isActive && !isSuperAdmin) return <Navigate to="/pending-activation" replace />
+  if (!isActive && !isSuperAdmin) {
+    const status = profile?.status
+    if (status === 'paused' || status === 'suspended') return <Navigate to="/pending-activation" replace />
+    return <Navigate to="/checkout" replace />
+  }
   // Wrong vertical → redirect to the user's own dashboard rather than 404.
   if (!isSuperAdmin && userIndustry && userIndustry !== industry) {
     return <Navigate to={dashboardPathFor(userIndustry)} replace />
