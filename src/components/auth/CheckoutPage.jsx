@@ -6,7 +6,7 @@ import { getDoc, doc } from 'firebase/firestore'
 import { functions, db } from '../../services/firebase'
 import { PLANS, dashboardPathFor } from '../../utils/industries'
 import AuthShell from './AuthShell'
-import { CheckCircle, Shield, Loader2, ArrowLeft, FileText, Mail } from 'lucide-react'
+import { CheckCircle, Shield, Loader2, ArrowLeft, FileText, Mail, CreditCard } from 'lucide-react'
 
 
 // Feature list per plan for the checkout summary card

@@ -58,6 +58,10 @@ service cloud.firestore {
     }
 
     // ── Super admin data ──────────────────────────────────────────────────────
+    // 'settings' is readable by any logged-in user (banking details for checkout)
+    match /superadmin/settings {
+      allow read: if request.auth != null;
+    }
     match /superadmin/{document=**} {
       allow read, write: if isSuperAdmin();
     }
