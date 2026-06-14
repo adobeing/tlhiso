@@ -382,7 +382,7 @@ export default function DashboardLayout({ industry, children, pageTitle }) {
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-lg shadow-primary/20">
               <IndustryIcon size={18} />
             </div>
-            <img src="/tlhiso-logo-white.png" alt="Tlhiso" className="h-7 w-auto" />
+            <img src="/tlhiso-logo-white.png?v=3" alt="Tlhiso" className="h-7 w-auto" />
           </div>
         )}
         <button onClick={() => setCollapsed(!collapsed)}
