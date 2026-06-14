@@ -53,13 +53,24 @@ function getStatus(u) { return u.status || (u.isActive ? 'active' : 'pending') }
 
 // ── Platform Overview ─────────────────────────────────────────────────────────
 function PlatformOverview() {
-  const [users, setUsers]       = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [users, setUsers]             = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [providerStats, setProviderStats] = useState(null)
+  const [providerLoading, setProviderLoading] = useState(true)
+
+  function fetchProviderStats() {
+    setProviderLoading(true)
+    httpsCallable(functions, 'getProviderStats')()
+      .then(r => setProviderStats(r.data))
+      .catch(() => setProviderStats(null))
+      .finally(() => setProviderLoading(false))
+  }
 
   useEffect(() => {
     getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')))
       .then(snap => { setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) })
       .catch(() => setLoading(false))
+    fetchProviderStats()
   }, [])
 
   const active    = users.filter(u => u.isActive).length
@@ -131,7 +142,79 @@ function PlatformOverview() {
         })}
       </div>
 
-      {/* Row 3 — Plan distribution + recent signups */}
+      {/* Row 3 — Provider Health */}
+      <div className="grid grid-cols-2 gap-5">
+
+        {/* BulkSMS */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><Smartphone size={16} /></span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">BulkSMS</p>
+                <p className="text-[10px] text-slate-400">Credit balance</p>
+              </div>
+            </div>
+            <button onClick={fetchProviderStats} disabled={providerLoading}
+              className="rounded-xl p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40">
+              <RefreshCw size={13} className={providerLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {providerLoading ? (
+            <div className="h-10 animate-pulse rounded-xl bg-slate-100" />
+          ) : providerStats?.bulksms?.error ? (
+            <p className="text-sm font-semibold text-red-500">{providerStats.bulksms.error}</p>
+          ) : (
+            <div>
+              <p className="text-4xl font-black text-slate-900">
+                {providerStats?.bulksms?.balance?.toLocaleString('en-ZA') ?? '—'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">{providerStats?.bulksms?.currency ?? 'ZAR'} credits remaining</p>
+            </div>
+          )}
+        </div>
+
+        {/* SendGrid */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600"><AtSign size={16} /></span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">SendGrid</p>
+                <p className="text-[10px] text-slate-400">
+                  {providerStats?.sendgrid?.period
+                    ? `Since ${new Date(providerStats.sendgrid.period + 'T00:00:00').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`
+                    : 'This month'}
+                </p>
+              </div>
+            </div>
+          </div>
+          {providerLoading ? (
+            <div className="grid grid-cols-5 gap-2">
+              {[...Array(5)].map((_, i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100" />)}
+            </div>
+          ) : providerStats?.sendgrid?.error ? (
+            <p className="text-sm font-semibold text-red-500">{providerStats.sendgrid.error}</p>
+          ) : (
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                { label: 'Sent',      value: providerStats?.sendgrid?.requests,  color: 'bg-slate-50 text-slate-700' },
+                { label: 'Delivered', value: providerStats?.sendgrid?.delivered, color: 'bg-emerald-50 text-emerald-700' },
+                { label: 'Bounced',   value: providerStats?.sendgrid?.bounces,   color: 'bg-red-50 text-red-600' },
+                { label: 'Opens',     value: providerStats?.sendgrid?.opens,     color: 'bg-blue-50 text-blue-600' },
+                { label: 'Clicks',    value: providerStats?.sendgrid?.clicks,    color: 'bg-purple-50 text-purple-600' },
+              ].map(({ label, value, color }) => (
+                <div key={label} className={`flex flex-col items-center justify-center rounded-2xl py-3 text-center ${color}`}>
+                  <span className="text-xl font-black">{value?.toLocaleString('en-ZA') ?? '—'}</span>
+                  <span className="mt-0.5 text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Row 4 — Plan distribution + recent signups */}
       <div className="grid grid-cols-[1fr_1.6fr] gap-5">
 
         {/* Plan distribution */}

@@ -1718,3 +1718,47 @@ exports.processBilling = onSchedule(
     }
   }
 )
+
+// ── getProviderStats ──────────────────────────────────────────────────────────
+// Super-admin only. Returns BulkSMS credit balance + current-month SendGrid stats.
+exports.getProviderStats = onCall({
+  secrets: ['SENDGRID_API_KEY', 'BULKSMS_TOKEN_ID', 'BULKSMS_TOKEN_SECRET'],
+}, async (req) => {
+  requireSuperAdmin(req)
+  const cfg = getConfig()
+
+  const now   = new Date()
+  const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const end   = now.toISOString().slice(0, 10)
+
+  const [bulkRes, sgRes] = await Promise.allSettled([
+    axios.get('https://api.bulksms.com/v1/credits/balance', {
+      auth: { username: cfg.bulksmsTokenId, password: cfg.bulksmsTokenSecret },
+    }),
+    axios.get(`https://api.sendgrid.com/v3/stats?start_date=${start}&end_date=${end}&aggregated_by=month`, {
+      headers: { Authorization: `Bearer ${cfg.sendgridKey}` },
+    }),
+  ])
+
+  const bulksms = bulkRes.status === 'fulfilled'
+    ? { balance: bulkRes.value.data.balance, currency: bulkRes.value.data.currency ?? 'ZAR' }
+    : { error: bulkRes.reason?.response?.data?.message ?? bulkRes.reason?.message }
+
+  let sendgrid = { error: 'Unavailable' }
+  if (sgRes.status === 'fulfilled') {
+    const row = sgRes.value.data?.[0]
+    const m   = row?.stats?.[0]?.metrics ?? {}
+    sendgrid = {
+      requests:  m.requests  ?? 0,
+      delivered: m.delivered ?? 0,
+      bounces:   m.bounces   ?? 0,
+      opens:     m.opens     ?? 0,
+      clicks:    m.clicks    ?? 0,
+      period:    start,
+    }
+  } else {
+    sendgrid = { error: sgRes.reason?.response?.data?.errors?.[0]?.message ?? sgRes.reason?.message }
+  }
+
+  return { bulksms, sendgrid }
+})
