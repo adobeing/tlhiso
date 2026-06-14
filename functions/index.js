@@ -1732,7 +1732,7 @@ exports.createYocoCheckout = onCall({ secrets: ['YOCO_SECRET_KEY'] }, async (req
   try {
     const resp = await axios.post('https://payments.yoco.com/api/checkouts', {
       currency: 'ZAR',
-      totalAmount: amountCents,
+      amount: amountCents,
       successUrl: `${baseUrl}/checkout/complete`,
       cancelUrl:  `${baseUrl}/checkout`,
       failureUrl: `${baseUrl}/checkout`,
