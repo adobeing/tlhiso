@@ -12,8 +12,8 @@ export default function AuthShell({ title, subtitle, children, footer }) {
               'radial-gradient(60% 50% at 20% 10%, rgba(91,142,125,0.55), transparent 60%), radial-gradient(50% 40% at 90% 90%, rgba(91,142,125,0.35), transparent 55%)',
           }}
         />
-        <Link to="/" className="relative z-10 text-2xl font-extrabold tracking-tight text-white">
-          Tlhiso
+        <Link to="/" className="relative z-10">
+          <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-9 w-auto brightness-0 invert" />
         </Link>
         <div className="relative z-10">
           <p className="text-3xl font-bold leading-tight text-white">
@@ -29,8 +29,8 @@ export default function AuthShell({ title, subtitle, children, footer }) {
 
       <main className="flex w-full items-center justify-center px-6 py-12 lg:w-7/12">
         <div className="w-full max-w-md">
-          <Link to="/" className="mb-8 inline-block text-xl font-extrabold tracking-tight text-primary lg:hidden">
-            Tlhiso
+          <Link to="/" className="mb-8 inline-block lg:hidden">
+            <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-8 w-auto" />
           </Link>
           <h1 className="text-2xl font-bold tracking-tight text-ink">{title}</h1>
           {subtitle && <p className="mt-2 text-sm text-ink-secondary">{subtitle}</p>}

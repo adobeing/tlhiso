@@ -180,7 +180,7 @@ export default function LandingPage() {
       {/* ── Nav ── */}
       <nav className="sticky top-0 z-50 border-b border-border/60 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
-          <span className="text-xl font-extrabold tracking-tight text-ink">Tlhiso</span>
+          <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-8 w-auto" />
           <div className="hidden items-center gap-8 text-sm font-medium text-ink-secondary md:flex">
             <a href="#features" className="transition hover:text-primary">Features</a>
             <a href="#testimonials" className="transition hover:text-primary">Reviews</a>
@@ -475,7 +475,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl">
           <div className="grid gap-10 md:grid-cols-4">
             <div>
-              <span className="text-xl font-extrabold tracking-tight text-ink">Tlhiso</span>
+              <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-8 w-auto" />
               <p className="mt-2 text-sm text-ink-secondary leading-relaxed">
                 Run your business. Smarter.<br />Built for South Africa.
               </p>
