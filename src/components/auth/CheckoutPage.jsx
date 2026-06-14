@@ -137,11 +137,11 @@ export default function CheckoutPage() {
         <table style="width:100%;border-collapse:collapse;margin:20px 0">
           <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Plan</td><td style="padding:10px">${plan.name}</td></tr>
           <tr><td style="padding:10px;font-weight:bold">Amount</td><td style="padding:10px">R${plan.price.toLocaleString('en-ZA')}/month</td></tr>
-          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Bank</td><td style="padding:10px">${b.bank || ''}</td></tr>
-          <tr><td style="padding:10px;font-weight:bold">Account name</td><td style="padding:10px">${b.accountName || ''}</td></tr>
-          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account number</td><td style="padding:10px">${b.account || ''}</td></tr>
-          <tr><td style="padding:10px;font-weight:bold">Branch code</td><td style="padding:10px">${b.branch || ''}</td></tr>
-          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account type</td><td style="padding:10px">${b.type || ''}</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Bank</td><td style="padding:10px">${b.bank || 'Contact support@tlhiso.com'}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold">Account name</td><td style="padding:10px">${b.accountName || 'Contact support@tlhiso.com'}</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account number</td><td style="padding:10px">${b.account || 'Contact support@tlhiso.com'}</td></tr>
+          <tr><td style="padding:10px;font-weight:bold">Branch code</td><td style="padding:10px">${b.branch || '—'}</td></tr>
+          <tr style="background:#f8fafb"><td style="padding:10px;font-weight:bold">Account type</td><td style="padding:10px">${b.type || '—'}</td></tr>
           <tr><td style="padding:10px;font-weight:bold;color:#5B8E7D">Payment reference</td><td style="padding:10px;font-weight:bold;color:#5B8E7D">${ref}</td></tr>
         </table>
         <p style="background:#fffbeb;border:1px solid #fcd34d;padding:12px;border-radius:8px;font-size:13px">
@@ -283,8 +283,7 @@ export default function CheckoutPage() {
         ) : (
           <button
             onClick={handleInvoiceRequest}
-            disabled={invoiceSending || !banking}
-            title={!banking ? 'Banking details not configured yet — contact support@tlhiso.com' : ''}
+            disabled={invoiceSending}
             className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white py-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-primary hover:text-primary disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {invoiceSending
