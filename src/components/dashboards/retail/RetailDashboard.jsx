@@ -7,7 +7,7 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Trash2, Tag, Calendar, Eye, Pencil, Bell, Loader2, X } from 'lucide-react'
@@ -17,7 +17,7 @@ import AutomationsModule from '../../shared/AutomationsModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SurveysModule from '../../shared/SurveysModule'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignPromoCard from '../../shared/CampaignPromoCard'
+import AiCampaignSuggestionsPanel from '../../shared/AiCampaignSuggestionsPanel'
 import InboxModule from '../../shared/InboxModule'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SettingsPage from '../../shared/SettingsPage'
@@ -124,7 +124,7 @@ function Overview() {
         subtitle="Your customers and campaigns at a glance."
       />
 
-      <CampaignPromoCard campaignsPath="/retail/campaigns" />
+      <AiCampaignSuggestionsPanel industry="retail" campaignsPath="/retail/campaigns" />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -489,6 +489,11 @@ function Appointments() {
     if (!uid || !form.date || !form.time) { alert('Date and time are required.'); return }
     setSaving(true)
     try {
+      const conflict = await getDocs(query(collection(db, 'users', uid, 'appointments'), where('date', '==', form.date), where('time', '==', form.time)))
+      if (conflict.docs.some(d => d.data().status !== 'Cancelled')) {
+        alert(`A booking already exists at ${form.time} on ${form.date}. Please choose a different time.`)
+        return
+      }
       const customer = customers.find(c => c.id === form.customerId)
       await addDoc(collection(db, 'users', uid, 'appointments'), {
         ...form, customer: customer?.name ?? '', customerPhone: customer?.phone ?? '', customerEmail: customer?.email ?? '', ownerPhone: profile?.phone ?? '', ownerEmail: user?.email ?? '', createdAt: serverTimestamp(),

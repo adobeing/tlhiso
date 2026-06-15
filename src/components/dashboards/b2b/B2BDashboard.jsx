@@ -7,7 +7,7 @@ import StatCard from '../../shared/StatCard'
 import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
-import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, Timestamp, getDocs, query, where } from 'firebase/firestore'
 import { db, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
 import { PlusCircle, Pencil, Trash2, Eye, Bell, Loader2, X, FileText, Users, Receipt, ClipboardList, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, Globe, MapPin, Building2, Send, CheckCircle, Flag, Clock, LayoutGrid, List as ListIcon } from 'lucide-react'
@@ -18,7 +18,7 @@ import FinanceModule from '../../shared/FinanceModule'
 import InboxModule from '../../shared/InboxModule'
 import PopiaModule from '../../shared/PopiaModule'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignPromoCard from '../../shared/CampaignPromoCard'
+import AiCampaignSuggestionsPanel from '../../shared/AiCampaignSuggestionsPanel'
 import AppointmentCalendar from '../../shared/AppointmentCalendar'
 import SurveysModule from '../../shared/SurveysModule'
 import SettingsPage from '../../shared/SettingsPage'
@@ -136,7 +136,7 @@ function Overview() {
         subtitle="Your business at a glance."
       />
 
-      <CampaignPromoCard campaignsPath="/b2b/campaigns" />
+      <AiCampaignSuggestionsPanel industry="b2b" campaignsPath="/b2b/campaigns" />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -1087,6 +1087,11 @@ function Appointments() {
     if (!uid || !form.clientId || !form.date || !form.time) { alert('Client, date and time are required.'); return }
     setSaving(true)
     try {
+      const conflict = await getDocs(query(collection(db, 'users', uid, 'appointments'), where('date', '==', form.date), where('time', '==', form.time)))
+      if (conflict.docs.some(d => d.data().status !== 'Cancelled')) {
+        alert(`A booking already exists at ${form.time} on ${form.date}. Please choose a different time.`)
+        return
+      }
       const client = clients.find(c => c.id === form.clientId)
       await addDoc(collection(db, 'users', uid, 'appointments'), {
         ...form, customer: client?.name ?? '', customerPhone: client?.phone ?? '', customerEmail: client?.email ?? '', ownerPhone: profile?.phone ?? '', ownerEmail: user?.email ?? '', createdAt: serverTimestamp(),

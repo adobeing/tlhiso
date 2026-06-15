@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 
 const EFFECTIVE_DATE = '1 July 2025'
-const COMPANY = 'Tlhiso (Pty) Ltd'
-const COMPANY_ADDRESS = 'Benoni, Gauteng, South Africa'
+const COMPANY = '3ML Concepts'
+const COMPANY_ADDRESS = '9 Lemonthorn, Kosmosdal, Centurion, Gauteng, South Africa'
 const EMAIL = 'hello@tlhiso.com'
 const WEBSITE = 'https://tlhiso.com'
 
@@ -353,7 +353,67 @@ function TermsContent() {
       </Section>
 
       {/* 19 */}
-      <Section id="s19" title="19. Contact Us">
+      <Section id="s19" title="19. Refund Policy">
+        <Callout type="amber" icon="💳" title="Subscription fees are generally non-refundable">
+          Because Tlhiso is a digital service provisioned immediately upon payment, fees paid are non-refundable
+          except in the circumstances set out below or as required by the Consumer Protection Act.
+        </Callout>
+        <Sub title="19.1 General Rule">
+          <p>All monthly subscription fees are non-refundable once payment has been received and your dashboard has been activated. This applies to partial months, unused message credits, and any period during which your account was suspended for non-payment.</p>
+        </Sub>
+        <Sub title="19.2 Refund Exceptions">
+          <p>A refund may be issued in the following circumstances:</p>
+          <ul className="mt-2 space-y-1.5">
+            <Li><strong>Non-delivery:</strong> If your dashboard was not activated within 5 business days of confirmed payment and you have not been notified of an exceptional delay, you are entitled to a full refund of that payment.</Li>
+            <Li><strong>Duplicate payment:</strong> If you were charged more than once for the same billing period due to a technical error, the duplicate amount will be refunded in full.</Li>
+            <Li><strong>Service failure:</strong> If the Platform was unavailable for more than 72 consecutive hours in a single billing month due to causes within our control, you may request a pro-rated credit for that period.</Li>
+            <Li><strong>CPA cooling-off:</strong> Where you are a consumer under the Consumer Protection Act 68 of 2008 and cancel within 5 business days of entering the agreement under your statutory cooling-off right, you are entitled to a full refund.</Li>
+          </ul>
+        </Sub>
+        <Sub title="19.3 How to Request a Refund">
+          <p>Email <a href={`mailto:${EMAIL}`} className="text-primary hover:underline">{EMAIL}</a> with the subject <strong>"Refund Request"</strong> within <strong>14 days</strong> of the disputed charge. Include your registered business name, invoice number, payment date, and reason for the request. We will acknowledge within 2 business days and resolve within 14 business days. Approved refunds are returned to your original payment method.</p>
+        </Sub>
+      </Section>
+
+      {/* 20 */}
+      <Section id="s20" title="20. Cancellation Policy">
+        <p>You may cancel your Tlhiso subscription at any time — there is no minimum contract term beyond the current paid billing period and no cancellation fees.</p>
+        <Sub title="20.1 How to Cancel">
+          <p>Email <a href={`mailto:${EMAIL}`} className="text-primary hover:underline">{EMAIL}</a> with the subject <strong>"Cancel Subscription"</strong>, including your registered email address and business name. We will confirm receipt within 1 business day.</p>
+        </Sub>
+        <Sub title="20.2 When Cancellation Takes Effect">
+          <p>Cancellation takes effect at the end of your current monthly billing period. You retain full access to the Platform until that date. No further invoices will be issued after cancellation is confirmed. To avoid being charged for the next billing month, your request must be received at least <strong>3 business days</strong> before your next renewal date.</p>
+        </Sub>
+        <Sub title="20.3 Data After Cancellation">
+          <p>Once your account is deactivated, your data remains available for export for <strong>30 days</strong> after the end of your last paid period. After 30 days, data may be permanently deleted. Request a data export at <a href={`mailto:${EMAIL}`} className="text-primary hover:underline">{EMAIL}</a> before the 30-day window closes.</p>
+        </Sub>
+        <Sub title="20.4 Auto-Renewal">
+          <p>Subscriptions automatically renew monthly unless cancelled. We will send a renewal reminder by email at least 5 business days before each billing date. Account suspension for non-payment does not constitute cancellation — a written cancellation request is required to permanently close your account.</p>
+        </Sub>
+      </Section>
+
+      {/* 21 */}
+      <Section id="s21" title="21. Delivery Policy">
+        <Callout type="green" icon="🚀" title="Tlhiso is a digital service — delivery means dashboard activation">
+          No physical goods are sold or shipped. "Delivery" means the provisioning and activation of your
+          industry-specific dashboard following confirmed payment.
+        </Callout>
+        <Sub title="21.1 What Constitutes Delivery">
+          <p>Delivery is complete when your dashboard has been published, your account activated, and you receive an email confirmation that you can log in and access all features in your subscription plan.</p>
+        </Sub>
+        <Sub title="21.2 Activation Timeline">
+          <p>Your dashboard will be activated within <strong>2 business days</strong> of confirmed payment. Payments received before 12:00 SAST on a business day are processed the same day; payments received after 12:00 SAST or on weekends and public holidays are processed on the next business day.</p>
+        </Sub>
+        <Sub title="21.3 Delays">
+          <p>Activation may be delayed if payment cannot be confirmed, if your registration details are incomplete, or due to a force majeure event (load-shedding, network outage, natural disaster). If activation will exceed 5 business days from confirmed payment we will notify you by email and offer you the choice to wait or receive a full refund.</p>
+        </Sub>
+        <Sub title="21.4 No Physical Delivery">
+          <p>Tlhiso does not sell, ship, or deliver physical goods. All services are provided digitally via the internet. You are responsible for having a compatible device and internet connection.</p>
+        </Sub>
+      </Section>
+
+      {/* 22 */}
+      <Section id="s22" title="22. Contact Us">
         <p>If you have questions about these Terms, our practices, or your rights, please reach out:</p>
         <div className="mt-2 rounded-xl bg-surface-2 px-5 py-4 text-sm">
           <p className="font-semibold text-ink">{COMPANY}</p>
@@ -668,7 +728,10 @@ const TOC_TERMS = [
   { id: 's16', label: '16. Dispute Resolution' },
   { id: 's17', label: '17. Governing Law' },
   { id: 's18', label: '18. Changes to Terms' },
-  { id: 's19', label: '19. Contact Us' },
+  { id: 's19', label: '19. Refund Policy' },
+  { id: 's20', label: '20. Cancellation Policy' },
+  { id: 's21', label: '21. Delivery Policy' },
+  { id: 's22', label: '22. Contact Us' },
 ]
 
 const TOC_PRIVACY = [

@@ -8,8 +8,8 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignPromoCard from '../../shared/CampaignPromoCard'
-import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment } from 'firebase/firestore'
+import AiCampaignSuggestionsPanel from '../../shared/AiCampaignSuggestionsPanel'
+import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, increment, getDocs, query, where } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
@@ -195,7 +195,7 @@ function Overview() {
         subtitle="Here's how your portfolio is performing."
       />
 
-      <CampaignPromoCard campaignsPath="/property/campaigns" />
+      <AiCampaignSuggestionsPanel industry="property" campaignsPath="/property/campaigns" />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -2217,6 +2217,11 @@ function PropertyAppointments() {
     if (!uid || !form.date || !form.time) { alert('Date and time are required.'); return }
     setSaving(true)
     try {
+      const conflict = await getDocs(query(collection(db, 'users', uid, 'appointments'), where('date', '==', form.date), where('time', '==', form.time)))
+      if (conflict.docs.some(d => d.data().status !== 'Cancelled')) {
+        alert(`A booking already exists at ${form.time} on ${form.date}. Please choose a different time.`)
+        return
+      }
       const tenant = tenants.find(t => t.id === form.tenantId)
       await addDoc(collection(db, 'users', uid, 'appointments'), {
         ...form,

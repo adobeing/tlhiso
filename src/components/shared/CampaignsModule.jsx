@@ -18,14 +18,14 @@
 //   Schedule later — writes status:'Scheduled' + scheduledFor Timestamp;
 //                   the Cloud Function processScheduledCampaigns fires every 5 min.
 
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { useAuth } from '../../contexts/AuthContext'
 import { useCollection } from '../../hooks/useCollection'
 import {
   addDoc, updateDoc, deleteDoc, doc,
   collection, serverTimestamp, increment, Timestamp,
-  getDocs, query, where,
+  getDocs, getDoc, setDoc, query, where, runTransaction,
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { db, functions } from '../../services/firebase'
@@ -38,7 +38,7 @@ import {
   CheckCircle, Loader2, Tag, Filter, X, Clock, AlertTriangle, Calendar,
   Upload, Eye, EyeOff, Monitor, Smartphone, Code, FileText, ChevronDown, ChevronRight, Star,
   MousePointer, TrendingUp, ArrowLeft, Layers, Copy, BookmarkPlus, Trash2, Save,
-  Repeat, Pause, Play, CreditCard, Bookmark,
+  Repeat, Pause, Play, CreditCard, Bookmark, Sparkles, Lightbulb,
 } from 'lucide-react'
 import { PLANS } from '../../utils/industries'
 import { shortenUrl } from '../../utils/shorten'
@@ -555,6 +555,23 @@ const CHANNEL_META = {
 
 const BLANK_SENDTO = { mode: 'all', tags: [], filters: [] }
 
+function currentWeekKey() {
+  const d = new Date()
+  const day = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - day)
+  const y = d.getUTCFullYear()
+  const yearStart = new Date(Date.UTC(y, 0, 1))
+  const w = Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
+  return `${y}-W${String(w).padStart(2, '0')}`
+}
+
+function nextMondayLabel() {
+  const d = new Date()
+  const daysUntil = (8 - d.getDay()) % 7 || 7
+  d.setDate(d.getDate() + daysUntil)
+  return d.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function CampaignsModule({ industry }) {
   const { user, profile } = useAuth()
@@ -629,6 +646,14 @@ export default function CampaignsModule({ industry }) {
   const [campaignMsgs, setCampaignMsgs] = useState([])
   const [loadingMsgs,  setLoadingMsgs]  = useState(false)
 
+  // AI Suggestions
+  const [aiLoading,     setAiLoading]     = useState(false)
+  const [aiSuggestions, setAiSuggestions] = useState([])
+  const [aiTip,         setAiTip]         = useState('')
+  const [aiError,       setAiError]       = useState(null)
+  const [aiChecked,     setAiChecked]     = useState(false)
+  const [aiThisWeek,    setAiThisWeek]    = useState(false)
+
   // Refs
   const bodyTextareaRef = useRef(null)
   const htmlFileRef     = useRef(null)
@@ -641,6 +666,37 @@ export default function CampaignsModule({ industry }) {
     })
     return [...s].sort()
   }, [contacts])
+
+  // ── Load weekly AI suggestions from Firestore cache ───────────────────────
+  useEffect(() => {
+    if (!uid) return
+    const ref = doc(db, `users/${uid}/aiSuggestions/latest`)
+    getDoc(ref).then(snap => {
+      if (snap.exists()) {
+        const data = snap.data()
+        if (data.weekKey === currentWeekKey() && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          setAiSuggestions(data.suggestions)
+          if (data.businessTip) setAiTip(data.businessTip)
+          setAiThisWeek(true)
+        }
+      }
+      setAiChecked(true)
+    }).catch(() => setAiChecked(true))
+  }, [uid])
+
+  // ── Auto-apply suggestion passed from dashboard via sessionStorage ──────────
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('tlhiso_ai_suggestion')
+      if (!raw) return
+      sessionStorage.removeItem('tlhiso_ai_suggestion')
+      const suggestion = JSON.parse(raw)
+      if (suggestion?.title) {
+        setTimeout(() => applyAiSuggestion(suggestion), 100)
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── 90-day appointment set ─────────────────────────────────────────────────
   const recentApptNames = useMemo(() => {
@@ -851,6 +907,56 @@ export default function CampaignsModule({ industry }) {
   function closeModal() {
     if (sending) return
     setView('list')
+  }
+
+  async function fetchAiSuggestions() {
+    if (aiThisWeek) return
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const recentNames = campaigns
+        .slice(-5)
+        .map(c => c.campaignName || c.subject || '')
+        .filter(Boolean)
+      const fn = httpsCallable(functions, 'suggestCampaign')
+      const result = await fn({
+        industry,
+        contactCount: contacts.length,
+        tags: [...allTags].slice(0, 10),
+        recentCampaigns: recentNames,
+      })
+      if (!result.data.success) {
+        setAiError(result.data.error || 'Failed to get suggestions.')
+      } else {
+        const suggestions = result.data.suggestions || []
+        const tip         = result.data.businessTip || ''
+        setAiSuggestions(suggestions)
+        if (tip) setAiTip(tip)
+        setAiThisWeek(true)
+        if (suggestions.length > 0) {
+          const ref = doc(db, `users/${uid}/aiSuggestions/latest`)
+          setDoc(ref, {
+            suggestions,
+            businessTip: tip,
+            weekKey: currentWeekKey(),
+            industry,
+            generatedAt: serverTimestamp(),
+          }).catch(() => {})
+        }
+      }
+    } catch {
+      setAiError('Could not reach AI. Please try again.')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  function applyAiSuggestion(suggestion) {
+    openModal()
+    setChannel(suggestion.channel || 'sms')
+    setBody(suggestion.channel === 'email' ? (suggestion.emailBody || '') : (suggestion.smsBody || ''))
+    setSubject(suggestion.emailSubject || '')
+    setCampaignName(suggestion.title || '')
   }
 
   // Load an existing campaign into the wizard — as a resumed draft
@@ -1156,10 +1262,21 @@ export default function CampaignsModule({ industry }) {
 
     let campaignRef
     if (editingDraftId) {
-      // Resumed draft — send from the same doc so history shows one campaign
+      // Resumed draft — atomically claim 'Sending' so a concurrent user can't double-send
       campaignRef = doc(db, 'users', uid, 'campaigns', editingDraftId)
       const { createdAt, ...rest } = baseCampaignPayload(unlayerHtmlExport)
-      await updateDoc(campaignRef, { ...rest, status: 'Sending' })
+      let alreadyClaimed = false
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(campaignRef)
+        const s = snap.data()?.status
+        if (s === 'Sending' || s === 'Sent' || s === 'Partial') { alreadyClaimed = true; return }
+        tx.update(campaignRef, { ...rest, status: 'Sending' })
+      })
+      if (alreadyClaimed) {
+        setSending(false)
+        setQuotaError('This campaign is already being sent by another user.')
+        return
+      }
     } else {
       campaignRef = await addDoc(
         collection(db, 'users', uid, 'campaigns'),
@@ -2628,6 +2745,110 @@ export default function CampaignsModule({ industry }) {
             {contacts.length} {config.contactLabel.toLowerCase()}s in base
           </p>
         </div>
+      </div>
+
+      {/* AI Campaign Suggestions */}
+      <div className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-violet-100 px-8 py-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100">
+              <Sparkles size={18} className="text-violet-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">AI Campaign Suggestions</h3>
+              <p className="text-xs font-medium text-slate-400">
+                Powered by Gemini AI · tailored to your {contacts.length} {config.contactLabel.toLowerCase()}{contacts.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          {aiThisWeek ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-2.5 text-xs font-semibold text-violet-600">
+              <Sparkles size={13} />
+              Next refresh: {nextMondayLabel()}
+            </div>
+          ) : (
+            <button
+              onClick={fetchAiSuggestions}
+              disabled={aiLoading || !aiChecked}
+              className="flex items-center gap-2 rounded-2xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-500/20 transition hover:bg-violet-700 disabled:opacity-60">
+              {aiLoading
+                ? <><Loader2 size={14} className="animate-spin" /> Thinking…</>
+                : <><Sparkles size={14} /> Get ideas</>}
+            </button>
+          )}
+        </div>
+
+        {aiError && (
+          <div className="px-8 py-4">
+            <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">{aiError}</p>
+          </div>
+        )}
+
+        {!aiLoading && aiSuggestions.length === 0 && !aiError && aiChecked && (
+          <div className="flex flex-col items-center px-8 py-10 text-center">
+            <Sparkles size={36} className="mb-3 text-violet-200" />
+            <p className="text-sm text-slate-400">
+              Your AI agent studies your {config.contactLabel.toLowerCase()}s and campaigns every Monday
+              and prepares fresh strategies. Click{' '}
+              <span className="font-semibold text-violet-600">Get ideas</span> to generate this week's suggestions now.
+            </p>
+          </div>
+        )}
+
+        {aiTip && (
+          <div className="mx-8 mt-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-5 shadow-lg shadow-amber-500/25">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/20">
+                <Lightbulb size={16} className="text-white" />
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-white/70">Your weekly insight</p>
+                <p className="font-bold leading-snug text-white">{aiTip}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {aiSuggestions.length > 0 && (
+          <div className="grid gap-4 p-8 sm:grid-cols-3">
+            {aiSuggestions.map((s, i) => (
+              <div key={i} className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm transition-all hover:border-violet-200 hover:shadow-md">
+                <div className="mb-3">
+                  <span className={`rounded-lg px-2 py-1 text-[11px] font-bold uppercase tracking-wider ${
+                    s.channel === 'email' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+                  }`}>
+                    {s.channel || 'sms'}
+                  </span>
+                </div>
+                <p className="mb-2 font-bold leading-snug text-slate-800">{s.title}</p>
+                <p className="mb-4 text-xs leading-relaxed text-slate-500">{s.description}</p>
+                <div className="mb-4 space-y-1.5">
+                  <p className="flex items-start gap-2 text-xs text-slate-500">
+                    <Clock size={11} className="mt-0.5 shrink-0 text-violet-400" />
+                    <span>{s.timing}</span>
+                  </p>
+                  <p className="flex items-start gap-2 text-xs text-slate-500">
+                    <Users size={11} className="mt-0.5 shrink-0 text-violet-400" />
+                    <span>{s.segment}</span>
+                  </p>
+                </div>
+                <div className="mt-auto rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    {s.channel === 'email' ? 'Email subject' : 'Sample SMS'}
+                  </p>
+                  <p className="text-xs leading-relaxed text-slate-700">
+                    {s.channel === 'email' ? s.emailSubject : s.smsBody}
+                  </p>
+                </div>
+                <button
+                  onClick={() => applyAiSuggestion(s)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-2.5 text-xs font-bold text-white transition hover:bg-violet-700">
+                  Use this suggestion →
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Performance chart */}

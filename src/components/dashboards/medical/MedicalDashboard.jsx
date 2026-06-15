@@ -8,9 +8,9 @@ import DataTable from '../../shared/DataTable'
 import Modal from '../../shared/Modal'
 import ProfilePage from '../../shared/ProfilePage'
 import SetupChecklist from '../../shared/SetupChecklist'
-import CampaignPromoCard from '../../shared/CampaignPromoCard'
+import AiCampaignSuggestionsPanel from '../../shared/AiCampaignSuggestionsPanel'
 import InboxModule from '../../shared/InboxModule'
-import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, doc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, functions } from '../../../services/firebase'
 import { httpsCallable } from 'firebase/functions'
@@ -471,7 +471,7 @@ function Overview() {
         <h2 className="text-lg font-bold text-slate-800">{`Welcome back${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`}</h2>
         <p className="mt-0.5 text-sm text-slate-600">Your practice at a glance.</p>
       </div>
-      <CampaignPromoCard campaignsPath="/medical/campaigns" />
+      <AiCampaignSuggestionsPanel industry="medical" campaignsPath="/medical/campaigns" />
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Patients" value={patients.length} icon="🫀"
@@ -2512,6 +2512,18 @@ function Appointments() {
     if (!uid || !form.patientId || !form.date || !form.time) { alert('Patient, date and time are required.'); return }
     setSaving(true)
     try {
+      const conflict = await getDocs(query(collection(db, 'users', uid, 'appointments'), where('date', '==', form.date), where('time', '==', form.time)))
+      const taken = conflict.docs.some(d => {
+        const a = d.data()
+        if (a.status === 'Cancelled') return false
+        if (form.practitioner && a.practitioner) return a.practitioner === form.practitioner
+        return true
+      })
+      if (taken) {
+        const who = form.practitioner ? ` for ${form.practitioner}` : ''
+        alert(`A booking already exists at ${form.time} on ${form.date}${who}. Please choose a different time.`)
+        return
+      }
       const patient = patients.find(p => p.id === form.patientId)
       const payload = {
         ...form,

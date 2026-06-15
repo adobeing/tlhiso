@@ -1874,3 +1874,315 @@ exports.getProviderStats = onCall({
 
   return { bulksms, sendgrid }
 })
+
+// ISO 8601 week key, e.g. "2026-W25" — Monday is the start of the week
+function weekKey() {
+  const d = new Date()
+  const day = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - day)
+  const y = d.getUTCFullYear()
+  const yearStart = new Date(Date.UTC(y, 0, 1))
+  const w = Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
+  return `${y}-W${String(w).padStart(2, '0')}`
+}
+
+// ── suggestCampaign (Gemini API) ─────────────────────────────────────────────
+// Generates 3 SA-tailored campaign strategy suggestions for the caller's industry.
+// Results are cached in /users/{uid}/aiSuggestions/latest for one week.
+// Get a free key at aistudio.google.com, then: firebase functions:secrets:set GEMINI_API_KEY
+exports.suggestCampaign = onCall({ timeoutSeconds: 60, secrets: ['GEMINI_API_KEY'] }, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+  const { industry, contactCount, tags, recentCampaigns } = req.data ?? {}
+
+  // Return cached suggestions if already generated this week
+  const wk = weekKey()
+  const cacheRef = db.doc(`users/${uid}/aiSuggestions/latest`)
+  const cacheSnap = await cacheRef.get()
+  if (cacheSnap.exists && cacheSnap.data()?.weekKey === wk) {
+    const cached = cacheSnap.data()?.suggestions
+    if (Array.isArray(cached) && cached.length > 0) {
+      return { success: true, suggestions: cached, fromCache: true }
+    }
+  }
+
+  const INDUSTRY_LABELS = {
+    medical:  'Medical & Health (doctors, clinics, therapists)',
+    b2b:      'B2B Professional Services',
+    property: 'Property Management',
+    retail:   'Retail & Consumer Business',
+  }
+  const CONTACT_LABELS = {
+    medical: 'patient', b2b: 'client', property: 'tenant', retail: 'customer',
+  }
+
+  const contactLabel  = CONTACT_LABELS[industry] ?? 'contact'
+  const industryLabel = INDUSTRY_LABELS[industry] ?? String(industry || 'business')
+  const safeTags      = Array.isArray(tags) ? tags.slice(0, 10) : []
+  const safeRecent    = Array.isArray(recentCampaigns) ? recentCampaigns.slice(0, 5) : []
+  const count         = Number(contactCount) || 0
+
+  const prompt = `You are a marketing strategist for South African SMEs using the Tlhiso platform.
+
+Business context:
+- Industry: ${industryLabel}
+- Contact base: ${count} ${contactLabel}${count !== 1 ? 's' : ''}${safeTags.length ? `\n- Contact tags available: ${safeTags.join(', ')}` : ''}${safeRecent.length ? `\n- Recent campaigns (do not repeat these): ${safeRecent.join(', ')}` : ''}
+
+Generate exactly 3 distinct, practical campaign suggestions for this South African business. Requirements:
+- Reference SA pay days (25th or last working day = high purchase intent) where relevant
+- Use South African English
+- SMS body must be 160 characters or fewer (total, including any {name} merge tag)
+- Suggest a mix: at least one SMS and one email campaign across the 3
+- Do not suggest anything that violates POPIA (no buying contact lists, always reference opt-in)
+
+Also include a "businessTip": one sharp, direct sentence (max 20 words) — the single most important action this owner should take THIS week to grow revenue or retain ${contactLabel}s. Make it concrete and SA-specific.
+
+Return ONLY valid JSON — no markdown, no code fences, no explanation:
+{
+  "businessTip": "One punchy sentence of actionable advice for this week.",
+  "suggestions": [
+    {
+      "title": "Campaign name (max 6 words)",
+      "description": "What this campaign does and why it works for SA ${contactLabel}s (1–2 sentences)",
+      "timing": "Best send time e.g. 'Tuesday at 10:00' or '25th of the month at 09:00 (pay day)'",
+      "segment": "Who to target e.g. 'All ${contactLabel}s' or a specific tag or filter",
+      "channel": "sms",
+      "smsBody": "Hi {name}, [message] — 160 chars max including {name}",
+      "emailSubject": "Subject line for the email version",
+      "emailBody": "Hi {name},\\n\\n[2–3 paragraph body]\\n\\nKind regards,\\n[Your Business]"
+    }
+  ]
+}`
+
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim()
+  if (!apiKey) return { success: false, error: 'AI not configured. Contact support.' }
+
+  // Try models in preference order — stops at the first one that succeeds
+  const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite']
+  const payload = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.7, maxOutputTokens: 3000 },
+  }
+
+  let aiResp = null
+  let lastErr = null
+  for (const model of MODELS) {
+    try {
+      aiResp = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        payload,
+        { headers: { 'Content-Type': 'application/json' }, timeout: 50000 }
+      )
+      break
+    } catch (e) {
+      lastErr = e
+      console.warn(`suggestCampaign: model ${model} failed (${e.response?.status}) — trying next`)
+    }
+  }
+
+  if (!aiResp) {
+    console.error('suggestCampaign: all models failed for uid=', uid)
+    return { success: false, error: 'Could not reach AI. Please try again later.' }
+  }
+
+  try {
+    const raw     = aiResp.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+
+    let parsed
+    try {
+      parsed = JSON.parse(cleaned)
+    } catch {
+      console.error('suggestCampaign: JSON parse failed —', raw.slice(0, 300))
+      return { success: false, error: 'AI returned an unexpected format. Please try again.' }
+    }
+
+    const suggestions  = Array.isArray(parsed?.suggestions) ? parsed.suggestions.slice(0, 3) : []
+    const businessTip  = typeof parsed?.businessTip === 'string' ? parsed.businessTip.trim() : ''
+
+    if (suggestions.length > 0) {
+      await cacheRef.set({
+        suggestions,
+        businessTip,
+        weekKey: wk,
+        industry,
+        generatedAt: admin.firestore.Timestamp.now(),
+      }).catch(e => console.warn('suggestCampaign: Firestore cache write failed —', e.message))
+    }
+
+    return { success: true, suggestions, businessTip }
+  } catch (e) {
+    console.error('suggestCampaign error', e.response?.status, e.response?.data ?? e.message)
+    return { success: false, error: 'Could not generate suggestions. Please try again.' }
+  }
+})
+
+// ── generateWeeklySuggestions ─────────────────────────────────────────────────
+// Runs every Monday at 07:00 SAST (05:00 UTC).
+// Reads each active user's real data (contacts, campaigns, appointments),
+// generates data-informed AI campaign suggestions, and stores them in Firestore
+// so they're ready instantly when the user opens the Campaigns module.
+exports.generateWeeklySuggestions = onSchedule(
+  { schedule: '0 5 * * 1', timeoutSeconds: 540, secrets: ['GEMINI_API_KEY'] },
+  async () => {
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim()
+    if (!apiKey) { console.error('[weekly AI] GEMINI_API_KEY not set'); return }
+
+    const wk = weekKey()
+    const INDUSTRY_LABELS = {
+      medical:  'Medical & Health (doctors, clinics, therapists)',
+      b2b:      'B2B Professional Services',
+      property: 'Property Management',
+      retail:   'Retail & Consumer Business',
+    }
+    const CONTACT_LABELS  = { medical: 'patient', b2b: 'client', property: 'tenant', retail: 'customer' }
+    const CONTACT_COLS    = { medical: 'patients', b2b: 'customers', property: 'tenants', retail: 'customers' }
+    const MODELS          = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite']
+
+    const usersSnap = await db.collection('users').where('isActive', '==', true).get()
+    console.log(`[weekly AI] week=${wk}, processing ${usersSnap.size} active users`)
+
+    for (const userDoc of usersSnap.docs) {
+      const uid      = userDoc.id
+      const u        = userDoc.data()
+      const industry = u.industry
+      if (!industry || !INDUSTRY_LABELS[industry]) continue
+
+      // Skip if already generated this week (manual or prior run)
+      const cacheRef  = db.doc(`users/${uid}/aiSuggestions/latest`)
+      const cacheSnap = await cacheRef.get()
+      if (cacheSnap.exists && cacheSnap.data()?.weekKey === wk) {
+        console.log(`[weekly AI] uid=${uid} already has week=${wk} suggestions — skipping`)
+        continue
+      }
+
+      try {
+        const contactCol = CONTACT_COLS[industry]
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+
+        const [contactSnap, campaignSnap, apptSnap] = await Promise.all([
+          db.collection(`users/${uid}/${contactCol}`).limit(500).get(),
+          db.collection(`users/${uid}/campaigns`).orderBy('createdAt', 'desc').limit(8).get(),
+          db.collection(`users/${uid}/appointments`)
+            .where('date', '>=', thirtyDaysAgo).limit(200).get(),
+        ])
+
+        // Summarise contact tags
+        const tagCounts = {}
+        contactSnap.docs.forEach(d =>
+          (d.data().tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1 })
+        )
+        const topTags = Object.entries(tagCounts)
+          .sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([t, n]) => `${t} (${n})`)
+
+        // Summarise campaign performance
+        const camps     = campaignSnap.docs.map(d => d.data())
+        const sentCamps = camps.filter(c => c.sentCount > 0)
+        const bestCamp  = [...sentCamps].sort((a, b) => (b.openCount || 0) - (a.openCount || 0))[0]
+        const avgOpen   = sentCamps.length
+          ? Math.round(sentCamps.reduce((s, c) => s + ((c.openCount || 0) / Math.max(c.sentCount, 1)) * 100, 0) / sentCamps.length)
+          : 0
+        const recentNames = sentCamps.slice(0, 4).map(c => c.campaignName || c.subject || '').filter(Boolean)
+
+        const contactLabel  = CONTACT_LABELS[industry]
+        const industryLabel = INDUSTRY_LABELS[industry]
+
+        const prompt = `You are a growth strategist for South African SMEs on the Tlhiso platform.
+
+Analyse this ${industryLabel} business's real performance data and generate 3 targeted campaign strategies for the coming week.
+
+Business data:
+- Contact base: ${contactSnap.size} ${contactLabel}s
+- Top contact segments: ${topTags.join(', ') || 'no tags set yet'}
+- Campaigns sent (last 8 weeks): ${sentCamps.length}, avg open rate ${avgOpen}%
+${bestCamp ? `- Best performing campaign: "${bestCamp.campaignName || bestCamp.subject || 'Untitled'}" (${bestCamp.openCount || 0} opens out of ${bestCamp.sentCount} sent)` : '- No campaigns sent yet — suggest first-time campaigns'}
+${recentNames.length ? `- Recent campaigns (do not repeat): ${recentNames.join(', ')}` : ''}
+- Appointments this month: ${apptSnap.size}
+
+Strategic priorities:
+1. Replicate what's working — if there's a top-performing campaign, build on that angle
+2. Re-engage ${contactLabel}s who haven't been contacted recently
+3. Capitalise on the SA pay-day cycle (25th or last working day of month = high purchase intent)
+4. POPIA-compliant messaging only — reference opted-in contacts, no bought lists
+
+Requirements:
+- South African English
+- SMS body must be 160 characters or fewer (including any {name} merge tag)
+- Mix channels: at least one SMS and one email across the 3 suggestions
+
+Also include a "businessTip": one sharp, direct sentence (max 20 words) — the single most important action this owner should take THIS week to grow revenue or retain ${contactLabel}s. Base it on the data above. Make it concrete and SA-specific.
+
+Return ONLY valid JSON — no markdown, no code fences, no explanation:
+{
+  "businessTip": "One punchy sentence of actionable advice for this week.",
+  "suggestions": [
+    {
+      "title": "Campaign name (max 6 words)",
+      "description": "Why this will grow the business this week, referencing the data above (1–2 sentences)",
+      "timing": "Best send time e.g. 'Monday at 09:00' or '25th of the month at 09:00 (pay day)'",
+      "segment": "Who to target e.g. 'All ${contactLabel}s' or a specific tag or filter",
+      "channel": "sms or email",
+      "smsBody": "Hi {name}, [message] — 160 chars max",
+      "emailSubject": "Subject line",
+      "emailBody": "Hi {name},\\n\\n[2–3 paragraph body]\\n\\nKind regards,\\n[Your Business]"
+    }
+  ]
+}`
+
+        let aiResp = null
+        for (const model of MODELS) {
+          try {
+            aiResp = await axios.post(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+              {
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.7, maxOutputTokens: 3000 },
+              },
+              { headers: { 'Content-Type': 'application/json' }, timeout: 50000 }
+            )
+            break
+          } catch (e) {
+            console.warn(`[weekly AI] model ${model} failed (${e.response?.status}) for uid=${uid}`)
+          }
+        }
+
+        if (!aiResp) { console.error(`[weekly AI] all models failed for uid=${uid}`); continue }
+
+        const raw     = aiResp.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+        let suggestions, businessTip
+        try {
+          const parsed = JSON.parse(cleaned)
+          suggestions  = parsed?.suggestions?.slice(0, 3) || []
+          businessTip  = typeof parsed?.businessTip === 'string' ? parsed.businessTip.trim() : ''
+        } catch {
+          console.error(`[weekly AI] JSON parse failed for uid=${uid}`)
+          continue
+        }
+
+        await cacheRef.set({
+          suggestions,
+          businessTip,
+          weekKey: wk,
+          industry,
+          generatedAt: admin.firestore.Timestamp.now(),
+          dataSnapshot: {
+            contactCount:         contactSnap.size,
+            campaignsSent:        sentCamps.length,
+            avgOpenRate:          avgOpen,
+            appointmentsThisMonth: apptSnap.size,
+          },
+        })
+        console.log(`[weekly AI] saved ${suggestions.length} suggestions for uid=${uid}`)
+
+        // Brief pause between users to stay within Gemini free-tier RPM limits
+        await new Promise(r => setTimeout(r, 2000))
+      } catch (e) {
+        console.error(`[weekly AI] error for uid=${uid}:`, e.message)
+      }
+    }
+
+    console.log('[weekly AI] done')
+  }
+)
