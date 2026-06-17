@@ -1184,7 +1184,7 @@ function AdminSupport() {
 
 // ── AI Agent ──────────────────────────────────────────────────────────────────
 const AGENT_DOC = doc(db, 'superadmin', 'aiAgent')
-const WELCOME   = "Hi! I'm Tlhiso Intelligence — your AI business analyst. I have live access to your Firestore user data.\n\nAsk me anything, like:\n• \"How many active users do I have?\"\n• \"What's my estimated MRR?\"\n• \"Show me all medical industry users\""
+const WELCOME   = "Hi! I'm Tlhiso Intelligence — your direct marketing and business growth advisor.\n\nI help you grow your users' businesses by identifying who to reach, what to say, and when to send it. I have live access to your platform data.\n\nTry asking:\n• \"Which users haven't sent a campaign this month?\"\n• \"Suggest a campaign for my medical users\"\n• \"Who is leaving growth on the table?\"\n• \"What's the best campaign to send this week?\""
 
 function AdminAIAgent() {
   const [messages,   setMessages]   = useState([{ role: 'assistant', text: WELCOME }])
@@ -1241,12 +1241,12 @@ function AdminAIAgent() {
   }
 
   const starters = [
-    'How many active users do I have?',
-    "What's my estimated MRR?",
-    'Show me all medical industry users',
-    'Which users are unpaid?',
-    'Break down users by subscription plan',
-    'Who registered most recently?',
+    "Which users haven't sent a campaign recently?",
+    'Suggest a campaign for my retail users',
+    'Who is leaving growth on the table?',
+    'Which medical users should run a re-engagement campaign?',
+    'What direct marketing should I push this week?',
+    'Show me users with low messaging activity',
   ]
 
   return (
