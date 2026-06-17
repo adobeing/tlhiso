@@ -2579,7 +2579,7 @@ TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R).
   // gemini-1.5-flash has 15 RPM free tier (3x more than 2.5-flash); gemini-1.5-flash-8b is a lighter fallback
   const MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
 
-  async function callGemini(contents, retried = false) {
+  async function callGemini(contents) {
     for (const model of MODELS) {
       try {
         const res = await fetch(
@@ -2595,13 +2595,11 @@ TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R).
             }),
           }
         )
-        if (res.status === 429 && !retried) {
-          // Rate-limited — wait 35s and retry once before moving to next model
-          console.warn(`[superAdminChat] ${model}: rate limited, retrying in 35s`)
-          await new Promise(r => setTimeout(r, 35000))
-          return callGemini(contents, true)
+        if (!res.ok) {
+          const e = await res.json()
+          console.error(`[superAdminChat] ${model}:`, e?.error?.message)
+          continue
         }
-        if (!res.ok) { const e = await res.json(); console.error(`[superAdminChat] ${model}:`, e?.error?.message); continue }
         const data = await res.json()
         if (data.candidates?.[0]) return data
       } catch (e) { console.error(`[superAdminChat] ${model}:`, e.message) }

@@ -1264,10 +1264,10 @@ function AdminCampaigns() {
   useEffect(() => {
     const col = collection(db, 'superadmin', 'data', 'campaigns')
     const q   = query(col, orderBy('sentAt', 'desc'))
-    return onSnapshot(q, snap => {
-      setCampaigns(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoading(false)
-    })
+    return onSnapshot(q,
+      snap => { setCampaigns(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) },
+      err  => { console.error('campaigns onSnapshot:', err); setLoading(false) }
+    )
   }, [])
 
   function pickTemplate(key) {
@@ -1343,7 +1343,7 @@ function AdminCampaigns() {
       )}
 
       {/* Compose modal */}
-      <Modal isOpen={composing} onClose={() => !sending && setComposing(false)} title="New Campaign">
+      <Modal open={composing} onClose={() => !sending && setComposing(false)} title="New Campaign">
         <div className="space-y-4 p-1">
           {/* Template picker */}
           <div>
