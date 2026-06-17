@@ -6,7 +6,7 @@
 //   /superadmin/messages → AdminMessages    — send email to any user
 //   /superadmin/settings → AdminSettings   — platform info
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import {
   collection, getDocs, doc, updateDoc, query, orderBy,
@@ -25,7 +25,7 @@ import {
   ArrowLeft, TrendingUp, MessageSquare, BarChart2,
   Calendar, FileText, UserCheck, UserX, Activity,
   DollarSign, Smartphone, AtSign, RefreshCw, ChevronRight,
-  Shield, Clock, Star, Bell,
+  Shield, Clock, Star, Bell, Bot,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1182,6 +1182,137 @@ function AdminSupport() {
   )
 }
 
+// ── AI Agent ──────────────────────────────────────────────────────────────────
+function AdminAIAgent() {
+  const [messages,   setMessages]   = useState([{
+    role: 'assistant',
+    text: "Hi! I'm Tlhiso Intelligence — your AI business analyst. I have live access to your Firestore user data.\n\nAsk me anything, like:\n• \"How many active users do I have?\"\n• \"What's my estimated MRR?\"\n• \"Show me all medical industry users\"",
+  }])
+  const [apiHistory, setApiHistory] = useState([])
+  const [input,      setInput]      = useState('')
+  const [loading,    setLoading]    = useState(false)
+  const bottomRef                   = useRef(null)
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
+
+  async function send(text) {
+    const msg = (text ?? input).trim()
+    if (!msg || loading) return
+    setInput('')
+    setMessages(m => [...m, { role: 'user', text: msg }])
+    setLoading(true)
+    try {
+      const res = await httpsCallable(functions, 'superAdminChat')({ message: msg, history: apiHistory })
+      setMessages(m => [...m, { role: 'assistant', text: res.data.reply }])
+      setApiHistory(res.data.history)
+    } catch (e) {
+      setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I ran into an error. Please try again.' }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const starters = [
+    'How many active users do I have?',
+    "What's my estimated MRR?",
+    'Show me all medical industry users',
+    'Which users are unpaid?',
+    'Break down users by subscription plan',
+    'Who registered most recently?',
+  ]
+
+  return (
+    <div className="flex h-[calc(100vh-6rem)] flex-col">
+      {/* Header */}
+      <div className="mb-5 shrink-0 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10">
+            <Bot size={22} className="text-primary" />
+          </span>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Tlhiso Intelligence</h2>
+            <p className="text-sm text-slate-400">Vertex AI · Gemini 2.0 Flash · live Firestore access</p>
+          </div>
+        </div>
+        <button onClick={() => { setMessages([{ role: 'assistant', text: "Conversation cleared. How can I help?" }]); setApiHistory([]) }}
+          className="flex items-center gap-1.5 rounded-2xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700">
+          <RefreshCw size={12} /> New conversation
+        </button>
+      </div>
+
+      {/* Chat panel */}
+      <div className="flex flex-1 overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm flex-col">
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {m.role === 'assistant' && (
+                <span className="mr-2.5 mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+                  <Bot size={14} className="text-primary" />
+                </span>
+              )}
+              <div className={`max-w-[76%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                m.role === 'user'
+                  ? 'rounded-br-sm bg-primary text-white'
+                  : 'rounded-bl-sm border border-slate-100 bg-slate-50 text-slate-800'
+              }`}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <span className="mr-2.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+                <Bot size={14} className="text-primary" />
+              </span>
+              <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-400">
+                <Loader2 size={13} className="animate-spin text-primary" /> Analysing your data…
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Starter chips — only before first user message */}
+        {messages.length === 1 && (
+          <div className="shrink-0 border-t border-slate-100 px-6 py-4">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-slate-400">Try asking</p>
+            <div className="flex flex-wrap gap-2">
+              {starters.map(s => (
+                <button key={s} onClick={() => send(s)} disabled={loading}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-primary hover:text-primary disabled:opacity-40">
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="shrink-0 border-t border-slate-100 px-4 py-4">
+          <div className="flex items-center gap-3">
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              placeholder="Ask about users, revenue, activity…"
+              disabled={loading}
+              className="flex-1 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-slate-50"
+            />
+            <button onClick={() => send()} disabled={loading || !input.trim()}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-white shadow-sm transition hover:bg-[#4e7d6d] disabled:cursor-not-allowed disabled:opacity-40">
+              {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+            </button>
+          </div>
+          <p className="mt-2 text-center text-[10px] text-slate-400">Powered by Vertex AI · Super admin only</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 export default function SuperAdminDashboard() {
   return (
@@ -1193,6 +1324,7 @@ export default function SuperAdminDashboard() {
         <Route path="notifications"    element={<AdminNotifications />}  />
         <Route path="support"          element={<AdminSupport />}        />
         <Route path="settings"         element={<AdminSettings />}       />
+        <Route path="agent"            element={<AdminAIAgent />}        />
       </Routes>
     </DashboardLayout>
   )

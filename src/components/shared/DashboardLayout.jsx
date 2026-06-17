@@ -17,7 +17,7 @@ import {
   Building2, HeartPulse, Map, ShoppingBag, Menu, X,
   Stethoscope, FileCheck, ArrowRightLeft, ClipboardSignature, HardHat,
   Star, Tag, List, CalendarClock, Zap, HelpCircle, Loader2, CheckCircle, Send, MessageSquare,
-  Wallet,
+  Wallet, Bot,
 } from 'lucide-react'
 
 const NAV_MAP = {
@@ -85,6 +85,7 @@ const NAV_MAP = {
   superadmin: [
     { label: 'Overview',       icon: LayoutDashboard, to: '/superadmin' },
     { label: 'All Users',      icon: Users,           to: '/superadmin/users' },
+    { label: 'AI Agent',       icon: Bot,             to: '/superadmin/agent' },
     { label: 'Notifications',  icon: Bell,            to: '/superadmin/notifications' },
     { label: 'Support',        icon: MessageSquare,   to: '/superadmin/support' },
     { label: 'Settings',       icon: Settings,        to: '/superadmin/settings' },

@@ -2186,3 +2186,152 @@ Return ONLY valid JSON — no markdown, no code fences, no explanation:
     console.log('[weekly AI] done')
   }
 )
+
+// ── superAdminChat (Vertex AI Agent) ─────────────────────────────────────────
+// Conversational AI agent for the super admin. Queries live Firestore data
+// using Gemini function-calling on Vertex AI (uses service account ADC, no key).
+const { VertexAI } = require('@google-cloud/vertexai')
+
+const VERTEX_TOOLS = [{
+  functionDeclarations: [
+    {
+      name: 'get_platform_stats',
+      description: 'Get overall platform KPIs: total users, active/pending counts, paid subscribers, estimated MRR, breakdown by industry and subscription plan.',
+      parameters: { type: 'OBJECT', properties: {} },
+    },
+    {
+      name: 'get_user_list',
+      description: 'List users with optional filters. Returns name, email, industry, plan, status and registration date for each user.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          industry: { type: 'STRING', description: 'Filter by industry: b2b, medical, property, or retail' },
+          status:   { type: 'STRING', description: 'Filter by status: active or pending' },
+          plan:     { type: 'STRING', description: 'Filter by plan key: starter, business, or enterprise' },
+          paid:     { type: 'BOOLEAN', description: 'true = paid only, false = unpaid only, omit = all' },
+          limit:    { type: 'INTEGER', description: 'Max results to return (default 20, max 50)' },
+        },
+      },
+    },
+    {
+      name: 'get_user_detail',
+      description: 'Get full profile and subscription details for a specific user, looked up by their email address.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          email: { type: 'STRING', description: 'Email address of the user to look up' },
+        },
+        required: ['email'],
+      },
+    },
+  ],
+}]
+
+function buildAgentTools(users) {
+  function planPrice(plan) { return parseFloat(PLAN_PRICES[plan]?.amount || 0) }
+  return {
+    get_platform_stats: () => {
+      const active    = users.filter(u => u.isActive).length
+      const paid      = users.filter(u => u.isPaid).length
+      const mrr       = users.filter(u => u.isPaid).reduce((s, u) => s + planPrice(u.plan), 0)
+      const byIndustry = {}
+      const byPlan     = {}
+      users.forEach(u => {
+        byIndustry[u.industry || 'unknown'] = (byIndustry[u.industry || 'unknown'] || 0) + 1
+        byPlan[u.plan || 'unknown']         = (byPlan[u.plan || 'unknown'] || 0) + 1
+      })
+      return { total: users.length, active, pending: users.length - active, paid, unpaid: users.length - paid, estimatedMRR_ZAR: mrr, byIndustry, byPlan }
+    },
+    get_user_list: ({ industry, status, plan, paid, limit = 20 }) => {
+      let list = users
+      if (industry)      list = list.filter(u => u.industry === industry)
+      if (status === 'active')  list = list.filter(u => u.isActive)
+      if (status === 'pending') list = list.filter(u => !u.isActive)
+      if (plan)          list = list.filter(u => u.plan === plan)
+      if (paid === true)  list = list.filter(u => u.isPaid)
+      if (paid === false) list = list.filter(u => !u.isPaid)
+      return list.slice(0, Math.min(limit, 50)).map(u => ({
+        name: u.name || u.businessName || u.email,
+        email: u.email, industry: u.industry, plan: u.plan,
+        isActive: u.isActive, isPaid: u.isPaid,
+        registered: u.createdAt?.toDate?.()?.toISOString?.() || null,
+      }))
+    },
+    get_user_detail: ({ email }) => {
+      const u = users.find(x => x.email?.toLowerCase() === email?.toLowerCase())
+      if (!u) return { error: `No user found with email: ${email}` }
+      return {
+        name: u.name, businessName: u.businessName, email: u.email, phone: u.phone,
+        industry: u.industry, profession: u.profession, plan: u.plan,
+        planPrice_ZAR: planPrice(u.plan) || null,
+        isActive: u.isActive, isPaid: u.isPaid,
+        status: u.status || (u.isActive ? 'active' : 'pending'),
+        address: u.address, vatNumber: u.vatNumber,
+        popiaConsent: u.popiaConsent,
+        registered: u.createdAt?.toDate?.()?.toISOString?.() || null,
+        paidAt: u.paidAt || null,
+      }
+    },
+  }
+}
+
+exports.superAdminChat = onCall({ timeoutSeconds: 60 }, async (req) => {
+  requireSuperAdmin(req)
+
+  const { message, history = [] } = req.data
+  if (!message || typeof message !== 'string') {
+    throw new HttpsError('invalid-argument', 'message is required')
+  }
+
+  // Load all users from Firestore (fresh per call so data is always live)
+  const snap  = await admin.firestore().collection('users').get()
+  const users = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+  const tools  = buildAgentTools(users)
+  const today  = new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  const vertexAI = new VertexAI({
+    project:  process.env.GCLOUD_PROJECT || 'tlhiso',
+    location: 'us-central1',
+  })
+
+  const genModel = vertexAI.getGenerativeModel({
+    model: 'gemini-2.0-flash-001',
+    systemInstruction: {
+      role: 'system',
+      parts: [{ text: `You are Tlhiso Intelligence — the AI business analyst for the Tlhiso SaaS platform, accessible only to the super admin.
+You have live access to Firestore user data via tools. Always call a tool to retrieve data before answering; never guess figures.
+Be concise, professional, and insight-driven. Use South African English. Currency is ZAR (R). Today is ${today}.
+When listing users, format them clearly. When giving numbers, highlight what's notable.` }],
+    },
+    tools: VERTEX_TOOLS,
+  })
+
+  const chat = genModel.startChat({ history })
+
+  let response  = await chat.sendMessage([{ text: message }])
+  let candidate = response.response.candidates?.[0]
+
+  // Agentic loop: execute tool calls until the model returns a text response
+  let loopCount = 0
+  while (candidate?.content?.parts?.some(p => p.functionCall) && loopCount < 5) {
+    loopCount++
+    const fcParts  = candidate.content.parts.filter(p => p.functionCall)
+    const toolResults = fcParts.map(p => {
+      const fn     = tools[p.functionCall.name]
+      const result = fn ? fn(p.functionCall.args || {}) : { error: `Unknown tool: ${p.functionCall.name}` }
+      console.log(`[superAdminChat] tool=${p.functionCall.name} args=${JSON.stringify(p.functionCall.args)}`)
+      return { functionResponse: { name: p.functionCall.name, response: { result } } }
+    })
+
+    response  = await chat.sendMessage(toolResults)
+    candidate = response.response.candidates?.[0]
+  }
+
+  const reply = candidate?.content?.parts?.map(p => p.text || '').join('').trim()
+    || 'I was unable to generate a response. Please try again.'
+
+  const updatedHistory = await chat.getHistory()
+
+  return { reply, history: updatedHistory }
+})
