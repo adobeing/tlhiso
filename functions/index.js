@@ -909,7 +909,7 @@ exports.createPayfastCheckout = onCall({
     cycles:            '0',                                 // indefinitely until cancelled
     custom_str1:       planKey,                             // plan key passed to IPN
   }
-  fields.signature = pfSignature(fields, passphrase)
+  fields.signature = pfSignature(fields, isSandbox ? null : passphrase)
 
   const body = Object.entries(fields)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
