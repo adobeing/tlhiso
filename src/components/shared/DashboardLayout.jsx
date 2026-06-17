@@ -85,6 +85,7 @@ const NAV_MAP = {
   superadmin: [
     { label: 'Overview',       icon: LayoutDashboard, to: '/superadmin' },
     { label: 'All Users',      icon: Users,           to: '/superadmin/users' },
+    { label: 'Campaigns',      icon: Megaphone,       to: '/superadmin/campaigns' },
     { label: 'AI Agent',       icon: Bot,             to: '/superadmin/agent' },
     { label: 'Notifications',  icon: Bell,            to: '/superadmin/notifications' },
     { label: 'Support',        icon: MessageSquare,   to: '/superadmin/support' },

@@ -1182,6 +1182,243 @@ function AdminSupport() {
   )
 }
 
+// ── Admin Campaigns ───────────────────────────────────────────────────────────
+const CAMPAIGN_TEMPLATES = {
+  onboarding: {
+    label: 'Onboarding Campaign',
+    subject: 'Welcome to Tlhiso — Here\'s How to Get Started',
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b">
+  <div style="background:#5B8E7D;padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
+    <h1 style="color:white;margin:0;font-size:24px">Welcome to Tlhiso!</h1>
+  </div>
+  <div style="background:#f8fafc;padding:32px 24px;border-radius:0 0 12px 12px">
+    <p style="font-size:16px">Hi there,</p>
+    <p>We're thrilled to have you on board. Tlhiso is built to help South African SMEs manage their business and grow through direct marketing.</p>
+    <p><strong>Here's how to get started in 3 steps:</strong></p>
+    <ol style="line-height:2">
+      <li>Complete your <strong>Business Profile</strong> so your customers know who you are</li>
+      <li>Import your <strong>contacts</strong> (clients, patients, or tenants) into the platform</li>
+      <li>Send your first <strong>Campaign</strong> — SMS, email, or WhatsApp</li>
+    </ol>
+    <div style="text-align:center;margin:32px 0">
+      <a href="https://tlhiso.com/login" style="background:#5B8E7D;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px">Log in to Tlhiso</a>
+    </div>
+    <p style="color:#64748b;font-size:14px">Need help? Reply to this email or reach us at <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+    <p style="color:#94a3b8;font-size:12px;text-align:center">Tlhiso · 9 Lemonthorn, Kosmosdal, Centurion, Gauteng · <a href="https://tlhiso.com" style="color:#94a3b8">tlhiso.com</a></p>
+  </div>
+</div>`,
+  },
+  newsletter: {
+    label: 'Monthly Newsletter',
+    subject: `Tlhiso Newsletter — ${new Date().toLocaleString('en-ZA', { month: 'long', year: 'numeric' })}`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b">
+  <div style="background:#5B8E7D;padding:32px 24px;border-radius:12px 12px 0 0;text-align:center">
+    <h1 style="color:white;margin:0;font-size:22px">Tlhiso Monthly Newsletter</h1>
+    <p style="color:#d1fae5;margin:8px 0 0">${new Date().toLocaleString('en-ZA', { month: 'long', year: 'numeric' })}</p>
+  </div>
+  <div style="background:#f8fafc;padding:32px 24px;border-radius:0 0 12px 12px">
+    <p style="font-size:16px">Hi there,</p>
+    <p>Here are your growth tips for this month to help you get more clients and grow revenue through direct marketing.</p>
+
+    <h2 style="color:#5B8E7D;font-size:18px;border-bottom:2px solid #e2e8f0;padding-bottom:8px">💡 Tip of the Month</h2>
+    <p><strong>Follow up with contacts who haven't heard from you in 30+ days.</strong> A simple "We miss you" SMS or email can re-activate dormant customers. Use the Campaigns tab in your Tlhiso dashboard to send a targeted re-engagement message today.</p>
+
+    <h2 style="color:#5B8E7D;font-size:18px;border-bottom:2px solid #e2e8f0;padding-bottom:8px">📣 What's New on Tlhiso</h2>
+    <p>[Add your platform updates, new features, or announcements here.]</p>
+
+    <h2 style="color:#5B8E7D;font-size:18px;border-bottom:2px solid #e2e8f0;padding-bottom:8px">🚀 This Month's Challenge</h2>
+    <p>Send at least <strong>one campaign</strong> to your contacts this month. Businesses that communicate regularly with their clients grow up to 3x faster. Log in and send yours today.</p>
+
+    <div style="text-align:center;margin:32px 0">
+      <a href="https://tlhiso.com/login" style="background:#5B8E7D;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px">Send a Campaign Now</a>
+    </div>
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+    <p style="color:#94a3b8;font-size:12px;text-align:center">Tlhiso · 9 Lemonthorn, Kosmosdal, Centurion, Gauteng · <a href="https://tlhiso.com" style="color:#94a3b8">tlhiso.com</a><br>You are receiving this because you have a Tlhiso account.</p>
+  </div>
+</div>`,
+  },
+  custom: { label: 'Custom Email', subject: '', html: '' },
+}
+
+const AUDIENCE_OPTIONS = [
+  { value: 'all',      label: 'All Active Users' },
+  { value: 'b2b',      label: 'B2B Users Only' },
+  { value: 'medical',  label: 'Medical Users Only' },
+  { value: 'property', label: 'Property Users Only' },
+  { value: 'retail',   label: 'Retail Users Only' },
+]
+
+function AdminCampaigns() {
+  const [campaigns, setCampaigns] = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [composing, setComposing] = useState(false)
+  const [template,  setTemplate]  = useState('onboarding')
+  const [subject,   setSubject]   = useState(CAMPAIGN_TEMPLATES.onboarding.subject)
+  const [htmlBody,  setHtmlBody]  = useState(CAMPAIGN_TEMPLATES.onboarding.html)
+  const [audience,  setAudience]  = useState('all')
+  const [preview,   setPreview]   = useState(false)
+  const [sending,   setSending]   = useState(false)
+  const [sendResult, setSendResult] = useState(null)
+
+  useEffect(() => {
+    const col = collection(db, 'superadmin', 'data', 'campaigns')
+    const q   = query(col, orderBy('sentAt', 'desc'))
+    return onSnapshot(q, snap => {
+      setCampaigns(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setLoading(false)
+    })
+  }, [])
+
+  function pickTemplate(key) {
+    setTemplate(key)
+    const t = CAMPAIGN_TEMPLATES[key]
+    setSubject(t.subject)
+    setHtmlBody(t.html)
+  }
+
+  async function send() {
+    if (!subject.trim() || !htmlBody.trim()) return
+    setSending(true)
+    setSendResult(null)
+    try {
+      const fn  = httpsCallable(functions, 'sendAdminCampaign')
+      const res = await fn({ subject, htmlBody, audience })
+      setSendResult({ ok: true, count: res.data.sentCount })
+      setComposing(false)
+    } catch (e) {
+      setSendResult({ ok: false, msg: e.message })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const audienceLabel = v => AUDIENCE_OPTIONS.find(o => o.value === v)?.label || v
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Campaigns</h1>
+          <p className="text-slate-500 text-sm mt-1">Send marketing emails to your platform users</p>
+        </div>
+        <button
+          onClick={() => { setComposing(true); setSendResult(null) }}
+          className="flex items-center gap-2 bg-[#5B8E7D] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#4a7a6b] transition-colors"
+        >
+          <Send size={16} /> New Campaign
+        </button>
+      </div>
+
+      {sendResult && (
+        <div className={`mb-4 px-4 py-3 rounded-lg text-sm font-medium ${sendResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {sendResult.ok ? `Campaign sent successfully to ${sendResult.count} user${sendResult.count !== 1 ? 's' : ''}.` : `Error: ${sendResult.msg}`}
+        </div>
+      )}
+
+      {/* Campaign history */}
+      {loading ? (
+        <div className="flex items-center justify-center h-40"><Loader2 className="animate-spin text-slate-400" size={28} /></div>
+      ) : campaigns.length === 0 ? (
+        <div className="text-center py-16 text-slate-400">
+          <Mail size={40} className="mx-auto mb-3 opacity-40" />
+          <p className="font-medium">No campaigns sent yet</p>
+          <p className="text-sm mt-1">Create your first campaign to reach your users</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {campaigns.map(c => (
+            <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800 truncate">{c.subject}</p>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {audienceLabel(c.audience)} · {c.sentCount} recipient{c.sentCount !== 1 ? 's' : ''}
+                  {c.sentAt?.toDate && ` · ${c.sentAt.toDate().toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}`}
+                </p>
+              </div>
+              <span className="shrink-0 bg-green-100 text-green-700 text-xs font-medium px-2.5 py-1 rounded-full capitalize">{c.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Compose modal */}
+      <Modal isOpen={composing} onClose={() => !sending && setComposing(false)} title="New Campaign">
+        <div className="space-y-4 p-1">
+          {/* Template picker */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Template</label>
+            <div className="flex gap-2 flex-wrap">
+              {Object.entries(CAMPAIGN_TEMPLATES).map(([key, t]) => (
+                <button
+                  key={key}
+                  onClick={() => pickTemplate(key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${template === key ? 'bg-[#5B8E7D] text-white border-[#5B8E7D]' : 'border-slate-200 text-slate-600 hover:border-[#5B8E7D]'}`}
+                >{t.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Audience */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Audience</label>
+            <select
+              value={audience}
+              onChange={e => setAudience(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B8E7D]"
+            >
+              {AUDIENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          {/* Subject */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Subject line</label>
+            <input
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B8E7D]"
+              placeholder="Email subject..."
+            />
+          </div>
+
+          {/* Body */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-slate-700">Email body (HTML)</label>
+              <button onClick={() => setPreview(p => !p)} className="text-xs text-[#5B8E7D] font-medium hover:underline">
+                {preview ? 'Edit HTML' : 'Preview'}
+              </button>
+            </div>
+            {preview ? (
+              <div className="border border-slate-200 rounded-lg p-4 max-h-72 overflow-y-auto bg-white" dangerouslySetInnerHTML={{ __html: htmlBody }} />
+            ) : (
+              <textarea
+                value={htmlBody}
+                onChange={e => setHtmlBody(e.target.value)}
+                rows={10}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#5B8E7D] resize-y"
+                placeholder="<p>Your email HTML here...</p>"
+              />
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setComposing(false)} disabled={sending} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 disabled:opacity-40">Cancel</button>
+            <button
+              onClick={send}
+              disabled={sending || !subject.trim() || !htmlBody.trim()}
+              className="flex items-center gap-2 bg-[#5B8E7D] text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-[#4a7a6b] disabled:opacity-50 transition-colors"
+            >
+              {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><Send size={14} /> Send Campaign</>}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
 // ── AI Agent ──────────────────────────────────────────────────────────────────
 const AGENT_DOC = doc(db, 'superadmin', 'aiAgent')
 const WELCOME   = "Hi! I'm Tlhiso Intelligence — your direct marketing and business growth advisor.\n\nI help you grow your users' businesses by identifying who to reach, what to say, and when to send it. I have live access to your platform data.\n\nTry asking:\n• \"Which users haven't sent a campaign this month?\"\n• \"Suggest a campaign for my medical users\"\n• \"Who is leaving growth on the table?\"\n• \"What's the best campaign to send this week?\""
@@ -1352,6 +1589,7 @@ export default function SuperAdminDashboard() {
         <Route path="notifications"    element={<AdminNotifications />}  />
         <Route path="support"          element={<AdminSupport />}        />
         <Route path="settings"         element={<AdminSettings />}       />
+        <Route path="campaigns"        element={<AdminCampaigns />}      />
         <Route path="agent"            element={<AdminAIAgent />}        />
       </Routes>
     </DashboardLayout>

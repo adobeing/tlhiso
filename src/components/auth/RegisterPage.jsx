@@ -74,6 +74,7 @@ export default function RegisterPage() {
         plan,
         isActive: false,
         popiaConsent: true,
+        marketingConsent: true,
         profilePhotoUrl: '',
         bankingDetails: null,
         createdAt: serverTimestamp(),

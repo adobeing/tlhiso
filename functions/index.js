@@ -797,6 +797,56 @@ exports.sendActivationEmail = onCall({ secrets: ['SENDGRID_API_KEY'] }, async (r
   }
 })
 
+// ── 8a. sendAdminCampaign ─────────────────────────────────────────────────────
+// Super admin sends a marketing email campaign to all subscribed users (or a
+// filtered audience).  Saves a campaign record to /superadmin/campaigns/{id}.
+exports.sendAdminCampaign = onCall({ timeoutSeconds: 120, secrets: ['SENDGRID_API_KEY'] }, async (req) => {
+  requireSuperAdmin(req)
+  const { subject, htmlBody, audience = 'all' } = req.data
+  if (!subject || !htmlBody) throw new HttpsError('invalid-argument', 'subject and htmlBody are required')
+
+  const cfg = getConfig()
+  sgMail.setApiKey(cfg.sendgridKey)
+
+  // Build Firestore query based on audience filter
+  let q = admin.firestore().collection('users').where('marketingConsent', '==', true).where('isActive', '==', true)
+  if (audience !== 'all') q = q.where('industry', '==', audience)
+
+  const snap = await q.get()
+  const recipients = snap.docs.map(d => ({ email: d.data().email, name: d.data().name || '' }))
+
+  if (recipients.length === 0) {
+    return { success: true, sentCount: 0, message: 'No subscribed users matched the audience.' }
+  }
+
+  // SendGrid allows up to 1000 personalizations per request — batch just in case
+  const BATCH = 900
+  let sentCount = 0
+  for (let i = 0; i < recipients.length; i += BATCH) {
+    const batch = recipients.slice(i, i + BATCH)
+    await sgMail.send({
+      personalizations: batch.map(r => ({ to: [{ email: r.email, name: r.name }] })),
+      from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+      subject,
+      html: htmlBody,
+    })
+    sentCount += batch.length
+  }
+
+  // Save campaign record
+  await admin.firestore().collection('superadmin').doc('data').collection('campaigns').add({
+    subject,
+    htmlBody,
+    audience,
+    sentCount,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    status: 'sent',
+    sentBy: req.auth?.token?.email || 'superadmin',
+  })
+
+  return { success: true, sentCount }
+})
+
 // ── 8. createPayfastCheckout ──────────────────────────────────────────────────
 // Generates a PayFast Onsite payment UUID for the authenticated user's plan.
 // Returns { uuid } — client passes this to window.payfast_do_onsite_payment().
@@ -2488,7 +2538,7 @@ function buildAgentTools(users) {
   }
 }
 
-exports.superAdminChat = onCall({ timeoutSeconds: 90, secrets: ['SENDGRID_API_KEY'] }, async (req) => {
+exports.superAdminChat = onCall({ timeoutSeconds: 90, secrets: ['SENDGRID_API_KEY', 'GEMINI_API_KEY'] }, async (req) => {
   requireSuperAdmin(req)
 
   const { message, history = [] } = req.data
@@ -2501,16 +2551,10 @@ exports.superAdminChat = onCall({ timeoutSeconds: 90, secrets: ['SENDGRID_API_KE
   const snap  = await admin.firestore().collection('users').get()
   const users = snap.docs.map(d => ({ id: d.id, ...d.data() }))
 
-  const tools = buildAgentTools(users)
+  const agentTools = buildAgentTools(users)
   const today = new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
-  const vertexAI = new VertexAI({ project: process.env.GCLOUD_PROJECT || 'tlhiso', location: 'us-central1' })
-
-  const genModel = vertexAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-001',
-    systemInstruction: {
-      role: 'system',
-      parts: [{ text: `You are Tlhiso Intelligence — a direct marketing and business growth advisor built into the Tlhiso platform. You serve the super admin who manages a portfolio of South African SME clients across B2B, medical, property, and retail industries.
+  const systemText = `You are Tlhiso Intelligence — a direct marketing and business growth advisor built into the Tlhiso platform. You serve the super admin who manages a portfolio of South African SME clients across B2B, medical, property, and retail industries.
 
 YOUR PRIMARY MISSION: Help every business on the platform grow their client base and revenue through direct marketing. Always think about: who can they reach, what should they say, and when should they send it.
 
@@ -2524,39 +2568,75 @@ HOW TO APPROACH EVERY CONVERSATION:
 
 DIRECT MARKETING PRINCIPLES YOU APPLY:
 - Businesses grow by consistently communicating with their existing contacts AND acquiring new ones.
-- The best time to send is when the recipient is most likely to act (not always Monday morning).
 - Personalisation increases conversion — use the customer's name and relevant details.
 - A follow-up message to non-responders can double campaign results.
 - Seasonal and event-based campaigns outperform generic ones.
 
 TOOLS: Always call a tool before stating figures. Use data to back every recommendation.
 ACTIONS: You can activate/suspend users, change plans, and send emails directly. Confirm after every action.
-TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R). Today is ${today}.` }],
-    },
-    tools: VERTEX_TOOLS,
-  })
+TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R). Today is ${today}.`
 
-  const chat = genModel.startChat({ history })
-  let response  = await chat.sendMessage([{ text: message }])
-  let candidate = response.response.candidates?.[0]
+  // gemini-1.5-flash has 15 RPM free tier (3x more than 2.5-flash); gemini-1.5-flash-8b is a lighter fallback
+  const MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
 
-  // Agentic loop: execute tool calls (async) until model returns a text response
-  let loopCount = 0
-  while (candidate?.content?.parts?.some(p => p.functionCall) && loopCount < 8) {
-    loopCount++
-    const fcParts    = candidate.content.parts.filter(p => p.functionCall)
-    const toolResults = await Promise.all(fcParts.map(async p => {
-      const fn     = tools[p.functionCall.name]
-      const result = fn ? await fn(p.functionCall.args || {}) : { error: `Unknown tool: ${p.functionCall.name}` }
-      console.log(`[superAdminChat] tool=${p.functionCall.name}`)
-      return { functionResponse: { name: p.functionCall.name, response: { result } } }
-    }))
-    response  = await chat.sendMessage(toolResults)
-    candidate = response.response.candidates?.[0]
+  async function callGemini(contents, retried = false) {
+    for (const model of MODELS) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system_instruction: { parts: [{ text: systemText }] },
+              contents,
+              tools: VERTEX_TOOLS,
+              generationConfig: { temperature: 0.7 },
+            }),
+          }
+        )
+        if (res.status === 429 && !retried) {
+          // Rate-limited — wait 35s and retry once before moving to next model
+          console.warn(`[superAdminChat] ${model}: rate limited, retrying in 35s`)
+          await new Promise(r => setTimeout(r, 35000))
+          return callGemini(contents, true)
+        }
+        if (!res.ok) { const e = await res.json(); console.error(`[superAdminChat] ${model}:`, e?.error?.message); continue }
+        const data = await res.json()
+        if (data.candidates?.[0]) return data
+      } catch (e) { console.error(`[superAdminChat] ${model}:`, e.message) }
+    }
+    throw new Error('All Gemini models failed')
   }
 
-  const reply = candidate?.content?.parts?.map(p => p.text || '').join('').trim()
+  // Build initial contents from persisted history + new user message
+  let contents = [...history, { role: 'user', parts: [{ text: message }] }]
+
+  let data      = await callGemini(contents)
+  let candidate = data.candidates[0]
+  contents      = [...contents, { role: 'model', parts: candidate.content.parts }]
+
+  // Agentic loop: execute tool calls until model returns a plain text response
+  let loopCount = 0
+  while (candidate.content.parts.some(p => p.functionCall) && loopCount < 8) {
+    loopCount++
+    const fnResponses = await Promise.all(
+      candidate.content.parts.filter(p => p.functionCall).map(async p => {
+        const fn     = agentTools[p.functionCall.name]
+        const result = fn ? await fn(p.functionCall.args || {}) : { error: `Unknown tool: ${p.functionCall.name}` }
+        console.log(`[superAdminChat] tool=${p.functionCall.name}`)
+        return { functionResponse: { name: p.functionCall.name, response: { result } } }
+      })
+    )
+
+    contents  = [...contents, { role: 'user', parts: fnResponses }]
+    data      = await callGemini(contents)
+    candidate = data.candidates[0]
+    contents  = [...contents, { role: 'model', parts: candidate.content.parts }]
+  }
+
+  const reply = candidate.content.parts.filter(p => p.text).map(p => p.text).join('').trim()
     || 'I was unable to generate a response. Please try again.'
 
-  return { reply, history: await chat.getHistory() }
+  return { reply, history: contents }
 })
