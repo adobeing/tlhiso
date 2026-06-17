@@ -860,8 +860,9 @@ function pfSignature(fields, passphrase) {
     .filter(([, v]) => v !== '' && v != null)
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
-  const toSign = passphrase
-    ? `${pfString}&passphrase=${encodeURIComponent(passphrase).replace(/%20/g, '+')}`
+  const pp = passphrase ? passphrase.trim() : null
+  const toSign = pp
+    ? `${pfString}&passphrase=${encodeURIComponent(pp).replace(/%20/g, '+')}`
     : pfString
   return crypto.createHash('md5').update(toSign).digest('hex')
 }
