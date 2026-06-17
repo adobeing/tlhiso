@@ -1183,33 +1183,61 @@ function AdminSupport() {
 }
 
 // ── AI Agent ──────────────────────────────────────────────────────────────────
+const AGENT_DOC = doc(db, 'superadmin', 'aiAgent')
+const WELCOME   = "Hi! I'm Tlhiso Intelligence — your AI business analyst. I have live access to your Firestore user data.\n\nAsk me anything, like:\n• \"How many active users do I have?\"\n• \"What's my estimated MRR?\"\n• \"Show me all medical industry users\""
+
 function AdminAIAgent() {
-  const [messages,   setMessages]   = useState([{
-    role: 'assistant',
-    text: "Hi! I'm Tlhiso Intelligence — your AI business analyst. I have live access to your Firestore user data.\n\nAsk me anything, like:\n• \"How many active users do I have?\"\n• \"What's my estimated MRR?\"\n• \"Show me all medical industry users\"",
-  }])
+  const [messages,   setMessages]   = useState([{ role: 'assistant', text: WELCOME }])
   const [apiHistory, setApiHistory] = useState([])
   const [input,      setInput]      = useState('')
   const [loading,    setLoading]    = useState(false)
+  const [hydrated,   setHydrated]   = useState(false)
   const bottomRef                   = useRef(null)
 
+  // Load persisted conversation on mount
+  useEffect(() => {
+    getDoc(AGENT_DOC).then(snap => {
+      if (snap.exists() && snap.data().messages?.length > 1) {
+        setMessages(snap.data().messages)
+        setApiHistory(snap.data().apiHistory || [])
+      }
+      setHydrated(true)
+    }).catch(() => setHydrated(true))
+  }, [])
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
+
+  async function persist(msgs, hist) {
+    try {
+      await setDoc(AGENT_DOC, { messages: msgs, apiHistory: hist, updatedAt: serverTimestamp() })
+    } catch {}
+  }
 
   async function send(text) {
     const msg = (text ?? input).trim()
     if (!msg || loading) return
     setInput('')
-    setMessages(m => [...m, { role: 'user', text: msg }])
+    const withUser = [...messages, { role: 'user', text: msg }]
+    setMessages(withUser)
     setLoading(true)
     try {
       const res = await httpsCallable(functions, 'superAdminChat')({ message: msg, history: apiHistory })
-      setMessages(m => [...m, { role: 'assistant', text: res.data.reply }])
+      const withReply = [...withUser, { role: 'assistant', text: res.data.reply }]
+      setMessages(withReply)
       setApiHistory(res.data.history)
+      await persist(withReply, res.data.history)
     } catch (e) {
       setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I ran into an error. Please try again.' }])
     } finally {
       setLoading(false)
     }
+  }
+
+  async function clearConversation() {
+    const initial = [{ role: 'assistant', text: 'Conversation cleared. How can I help?' }]
+    setMessages(initial)
+    setApiHistory([])
+    await persist(initial, [])
   }
 
   const starters = [
@@ -1234,7 +1262,7 @@ function AdminAIAgent() {
             <p className="text-sm text-slate-400">Vertex AI · Gemini 2.0 Flash · live Firestore access</p>
           </div>
         </div>
-        <button onClick={() => { setMessages([{ role: 'assistant', text: "Conversation cleared. How can I help?" }]); setApiHistory([]) }}
+        <button onClick={clearConversation}
           className="flex items-center gap-1.5 rounded-2xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700">
           <RefreshCw size={12} /> New conversation
         </button>
@@ -1275,8 +1303,8 @@ function AdminAIAgent() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Starter chips — only before first user message */}
-        {messages.length === 1 && (
+        {/* Starter chips — only when no conversation history exists yet */}
+        {hydrated && messages.length === 1 && (
           <div className="shrink-0 border-t border-slate-100 px-6 py-4">
             <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-slate-400">Try asking</p>
             <div className="flex flex-wrap gap-2">
