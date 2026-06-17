@@ -39,7 +39,6 @@ const getConfig = () => ({
   twilioToken: process.env.TWILIO_AUTH_TOKEN,
   twilioNumber: process.env.TWILIO_NUMBER,
   twilioWhatsapp: process.env.TWILIO_WHATSAPP_NUMBER,
-  yocoSecretKey: process.env.YOCO_SECRET_KEY,
 })
 
 // ── 1. sendEmail ──────────────────────────────────────────────────────────────
@@ -887,25 +886,28 @@ exports.createPayfastCheckout = onCall({
   const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
 
   const nameParts = (user.name || 'User').trim().split(/\s+/)
-  const today     = new Date().toISOString().slice(0, 10)
+  // First real charge happens 30 days from today — today is free (R0)
+  const trialEnd  = new Date(); trialEnd.setDate(trialEnd.getDate() + 30)
+  const billingDate = trialEnd.toISOString().slice(0, 10)
 
   const fields = {
-    merchant_id:      merchantId,
-    merchant_key:     merchantKey,
-    return_url:       'https://tlhiso.com/checkout/complete',
-    cancel_url:       'https://tlhiso.com/checkout',
-    notify_url:       'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
-    name_first:       nameParts[0],
-    name_last:        nameParts.slice(1).join(' ') || 'User',
-    email_address:    user.email,
-    m_payment_id:     uid,
-    amount:           planData.amount,
-    item_name:        planData.name,
+    merchant_id:       merchantId,
+    merchant_key:      merchantKey,
+    return_url:        'https://tlhiso.com/checkout/complete',
+    cancel_url:        'https://tlhiso.com/checkout',
+    notify_url:        'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
+    name_first:        nameParts[0],
+    name_last:         nameParts.slice(1).join(' ') || 'User',
+    email_address:     user.email,
+    m_payment_id:      uid,
+    amount:            '0.00',                              // R0 today — 30-day free trial
+    item_name:         `${planData.name} — 30-Day Free Trial`,
     subscription_type: '1',
-    billing_date:     today,
-    recurring_amount: planData.amount,
-    frequency:        '3',
-    cycles:           '0',
+    billing_date:      billingDate,                         // first real charge in 30 days
+    recurring_amount:  planData.amount,                     // plan price every month after
+    frequency:         '3',                                 // monthly
+    cycles:            '0',                                 // indefinitely until cancelled
+    custom_str1:       planKey,                             // plan key passed to IPN
   }
   fields.signature = pfSignature(fields, passphrase)
 
@@ -989,43 +991,92 @@ exports.payfastIPN = onRequest({
 
   if (paymentStatus === 'COMPLETE') {
     try {
-      // Activate user
-      await db.collection('users').doc(uid).update({
-        isActive:         true,
-        paidAt:           admin.firestore.FieldValue.serverTimestamp(),
-        paymentStatus:    'active',
-        payfastPaymentId: pfPaymentId || null,
-      })
-
-      // Send welcome email
       const cfg = getConfig()
       sgMail.setApiKey(cfg.sendgridKey)
-      const userSnap = await db.collection('users').doc(uid).get()
-      const user = userSnap.data()
-      if (user?.email) {
-        await sgMail.send({
-          to: user.email,
-          from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
-          subject: '🎉 Your Tlhiso subscription is active!',
-          html: `
-            <h2>Welcome to Tlhiso!</h2>
-            <p>Hi ${user.name || 'there'},</p>
-            <p>Your <strong>${PLAN_PRICES[user.plan]?.name || 'Tlhiso'}</strong> subscription is now active.
-            You can log in and start using your dashboard right away.</p>
-            <p><a href="https://tlhiso.com/login"
-              style="background:#5B8E7D;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:12px;">
-              Go to my dashboard →
-            </a></p>
-            <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? hello@tlhiso.com</p>
-          `,
+      const userSnap  = await db.collection('users').doc(uid).get()
+      const user      = userSnap.data() || {}
+      const planKey   = data.custom_str1 || user.plan || 'starter'
+      const pfToken   = data.token || null
+      const amountGross = parseFloat(data.amount_gross || '0')
+      const isTrial   = amountGross < 1   // R0 initial charge = trial activation
+
+      const PLAN_QUOTAS = { starter: 1000, business: 3000, enterprise: 10000 }
+
+      if (isTrial) {
+        // Card captured, no charge — activate trial
+        const trialEndsAt = new Date(); trialEndsAt.setDate(trialEndsAt.getDate() + 30)
+        await db.collection('users').doc(uid).update({
+          isActive:             true,
+          paymentMethod:        'payfast',
+          paymentStatus:        'trial',
+          trialActive:          true,
+          trialStartedAt:       admin.firestore.FieldValue.serverTimestamp(),
+          trialEndsAt:          admin.firestore.Timestamp.fromDate(trialEndsAt),
+          trialMessagesLimit:   30,
+          messagesUsed:         0,
+          payfastPaymentId:     pfPaymentId || null,
+          ...(pfToken && { pfSubscriptionToken: pfToken }),
         })
+        if (user.email) {
+          await sgMail.send({
+            to: user.email,
+            from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+            subject: '🎉 Your 30-day free trial has started!',
+            html: `
+              <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+                <h2 style="color:#5B8E7D">Welcome to Tlhiso!</h2>
+                <p>Hi ${user.name || 'there'},</p>
+                <p>Your <strong>30-day free trial</strong> is now active. You have <strong>30 campaign messages</strong> to explore the platform.</p>
+                <p>Your first subscription charge of <strong>R${parseFloat(PLAN_PRICES[planKey]?.amount || 0).toLocaleString('en-ZA')}/month</strong> will be billed automatically on <strong>${trialEndsAt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.</p>
+                <p>You can cancel anytime before then with no charge.</p>
+                <p style="margin:24px 0"><a href="https://tlhiso.com/login" style="background:#5B8E7D;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block">Go to my dashboard →</a></p>
+                <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
+              </div>`,
+          })
+        }
+        console.log(`payfastIPN: trial activated uid=${uid}`)
+      } else {
+        // Real recurring payment — full subscription active
+        const quota = PLAN_QUOTAS[planKey] ?? PLAN_QUOTAS.starter
+        await db.collection('users').doc(uid).update({
+          isActive:             true,
+          isPaid:               true,
+          paymentMethod:        'payfast',
+          paymentStatus:        'active',
+          trialActive:          false,
+          planMessagesQuota:    quota,
+          messagesUsed:         0,
+          paidAt:               admin.firestore.FieldValue.serverTimestamp(),
+          payfastPaymentId:     pfPaymentId || null,
+          ...(pfToken && { pfSubscriptionToken: pfToken }),
+        })
+        if (user.email) {
+          await sgMail.send({
+            to: user.email,
+            from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+            subject: '✅ Payment received — your Tlhiso subscription is active',
+            html: `
+              <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+                <h2 style="color:#5B8E7D">Payment Confirmed</h2>
+                <p>Hi ${user.name || 'there'},</p>
+                <p>Your payment of <strong>R${amountGross.toLocaleString('en-ZA')}</strong> was received. Your <strong>${PLAN_PRICES[planKey]?.name || 'Tlhiso'}</strong> subscription is active and your message quota has been reset.</p>
+                <p style="margin:24px 0"><a href="https://tlhiso.com/login" style="background:#5B8E7D;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block">Go to my dashboard →</a></p>
+                <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
+              </div>`,
+          })
+        }
+        console.log(`payfastIPN: payment received uid=${uid}, amount=${amountGross}`)
       }
-      console.log(`payfastIPN: activated uid=${uid}, pfPaymentId=${pfPaymentId}`)
     } catch (e) {
       console.error('payfastIPN: activation error', e.message)
       res.status(500).send('Activation error')
       return
     }
+  } else if (paymentStatus === 'CANCELLED') {
+    try {
+      await db.collection('users').doc(uid).update({ paymentStatus: 'cancelled', isActive: false, isPaid: false })
+      console.log(`payfastIPN: subscription cancelled uid=${uid}`)
+    } catch (e) { console.error('payfastIPN: cancel error', e.message) }
   } else {
     console.log(`payfastIPN: status=${paymentStatus} for uid=${uid} — no action`)
   }
@@ -1638,12 +1689,11 @@ exports.createTenantMaintenance = onCall({
 //    fresh invoice generated (and optionally emailed to the client).
 // b) Monthly statements: on the 1st, users with autoStatements=true get a
 //    summary of open invoices emailed to each client that owes.
-// c) Yoco subscription renewals: email payment link 3 days before due date;
-//    suspend accounts 7+ days overdue.
+// c) PayFast subscription renewals are handled automatically by PayFast; IPN updates account status.
 exports.processBilling = onSchedule(
   {
     schedule: '0 6 * * *',
-    secrets: ['SENDGRID_API_KEY', 'YOCO_SECRET_KEY'],
+    secrets: ['SENDGRID_API_KEY'],
   },
   async () => {
     const now = admin.firestore.Timestamp.now()
@@ -1718,66 +1768,6 @@ exports.processBilling = onSchedule(
       }
     }
 
-    // ── c) Yoco subscription renewals (daily) ────────────────────────────────
-    const nowDate = new Date()
-    const reminderCutoff = new Date(nowDate); reminderCutoff.setDate(reminderCutoff.getDate() + 3)
-    const yocoDueSnap = await db.collection('users')
-      .where('paymentMethod', '==', 'yoco')
-      .where('isActive', '==', true)
-      .where('nextBillingAt', '<=', admin.firestore.Timestamp.fromDate(reminderCutoff))
-      .get()
-    for (const userDoc of yocoDueSnap.docs) {
-      const u = userDoc.data()
-      if (!u.email || !u.plan || !PLAN_PRICES[u.plan]) continue
-      const nextBilling = u.nextBillingAt?.toDate?.()
-      if (!nextBilling) continue
-      const daysOverdue = Math.floor((nowDate - nextBilling) / (1000 * 60 * 60 * 24))
-      if (daysOverdue > 7) {
-        await userDoc.ref.update({ isActive: false, status: 'suspended', isPaid: false })
-        console.log(`[billing] suspended yoco uid=${userDoc.id} (${daysOverdue}d overdue)`)
-        continue
-      }
-      // Skip if a reminder was already sent today
-      const lastReminder = u.lastBillingReminderAt
-      if (lastReminder) {
-        const lastStr = (lastReminder.toDate ? lastReminder.toDate() : new Date(lastReminder)).toISOString().slice(0, 10)
-        if (lastStr === nowDate.toISOString().slice(0, 10)) continue
-      }
-      try {
-        const projectId = process.env.GCLOUD_PROJECT || 'tlhiso'
-        const baseUrl = projectId === 'tlhiso-staging' ? 'https://tlhiso-staging.web.app' : 'https://tlhiso.web.app'
-        const amountCents = Math.round(parseFloat(PLAN_PRICES[u.plan].amount) * 100)
-        const yocoResp = await axios.post('https://payments.yoco.com/api/checkouts', {
-          currency: 'ZAR', amount: amountCents,
-          successUrl: `${baseUrl}/checkout/complete`,
-          cancelUrl:  `${baseUrl}/checkout`,
-          failureUrl: `${baseUrl}/checkout`,
-          metadata:   { uid: userDoc.id, plan: u.plan },
-        }, { headers: { Authorization: `Bearer ${cfg.yocoSecretKey}`, 'Content-Type': 'application/json' } })
-        const payUrl = yocoResp.data.redirectUrl
-        const planName = PLAN_PRICES[u.plan].name
-        const amount = `R${Number(PLAN_PRICES[u.plan].amount).toLocaleString('en-ZA')}`
-        const dueDateStr = nextBilling.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
-        sgMail.setApiKey(cfg.sendgridKey)
-        await sgMail.send({
-          to: u.email,
-          from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
-          subject: `Your Tlhiso subscription renewal — ${amount}`,
-          html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
-            <h2 style="color:#5B8E7D">Subscription Renewal</h2>
-            <p>Hi ${u.name || 'there'},</p>
-            <p>Your <strong>${planName}</strong> subscription (<strong>${amount}/month</strong>) is due on <strong>${dueDateStr}</strong>.</p>
-            <p style="margin:24px 0"><a href="${payUrl}" style="background:#5B8E7D;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">Pay ${amount} with Yoco</a></p>
-            <p style="font-size:12px;color:#94a3b8">This link expires in 24 hours. Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
-          </div>`,
-        })
-        await userDoc.ref.update({ lastBillingReminderAt: admin.firestore.FieldValue.serverTimestamp() })
-        console.log(`[billing] yoco renewal reminder sent uid=${userDoc.id}`)
-      } catch (e) {
-        console.error(`[billing] yoco renewal error uid=${userDoc.id}:`, e.message)
-      }
-    }
-
     // ── b) Monthly statements (1st of the month) ─────────────────────────────
     if (new Date().getUTCDate() !== 1) return
     const usersSnap = await db.collection('users').where('autoStatements', '==', true).get()
@@ -1831,55 +1821,6 @@ exports.processBilling = onSchedule(
     }
   }
 )
-
-// ── createYocoCheckout ────────────────────────────────────────────────────────
-exports.createYocoCheckout = onCall({ secrets: ['YOCO_SECRET_KEY'] }, async (req) => {
-  requireAuth(req)
-  const { planKey } = req.data
-  if (!PLAN_PRICES[planKey]) throw new HttpsError('invalid-argument', 'Invalid plan.')
-  const cfg = getConfig()
-  const projectId = process.env.GCLOUD_PROJECT || 'tlhiso'
-  const baseUrl = projectId === 'tlhiso-staging' ? 'https://tlhiso-staging.web.app' : 'https://tlhiso.web.app'
-  const amountCents = Math.round(parseFloat(PLAN_PRICES[planKey].amount) * 100)
-  try {
-    const resp = await axios.post('https://payments.yoco.com/api/checkouts', {
-      currency: 'ZAR',
-      amount: amountCents,
-      successUrl: `${baseUrl}/checkout/complete`,
-      cancelUrl:  `${baseUrl}/checkout`,
-      failureUrl: `${baseUrl}/checkout`,
-      metadata:   { uid: req.auth.uid, plan: planKey },
-    }, {
-      headers: { Authorization: `Bearer ${cfg.yocoSecretKey}`, 'Content-Type': 'application/json' },
-    })
-    return { redirectUrl: resp.data.redirectUrl, id: resp.data.id }
-  } catch (e) {
-    console.error('Yoco checkout error:', e.response?.data ?? e.message)
-    throw new HttpsError('internal', e.response?.data?.errorCode ?? 'Yoco payment creation failed.')
-  }
-})
-
-// ── yocoWebhook ───────────────────────────────────────────────────────────────
-exports.yocoWebhook = onRequest(async (req, res) => {
-  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
-  const event = req.body
-  if (event?.type === 'payment.succeeded') {
-    const meta = event?.payload?.metadata ?? {}
-    if (meta.uid && meta.plan) {
-      try {
-        const nextBillingAt = new Date()
-        nextBillingAt.setDate(nextBillingAt.getDate() + 30)
-        await db.collection('users').doc(meta.uid).update({
-          isActive: true, isPaid: true, status: 'active',
-          plan: meta.plan, paidAt: new Date().toISOString(), paymentMethod: 'yoco',
-          nextBillingAt: admin.firestore.Timestamp.fromDate(nextBillingAt),
-        })
-        console.log(`[yoco] activated uid=${meta.uid} plan=${meta.plan} nextBillingAt=${nextBillingAt.toISOString()}`)
-      } catch (e) { console.error('[yoco] activation error:', e.message) }
-    }
-  }
-  res.status(200).send('OK')
-})
 
 // ── getProviderStats ──────────────────────────────────────────────────────────
 // Super-admin only. Returns BulkSMS credit balance + current-month SendGrid stats.
