@@ -187,8 +187,8 @@ export default function CheckoutPage() {
 
   return (
     <AuthShell
-      title="Start your free trial"
-      subtitle="30 days free — no charge today. Cancel anytime."
+      title="Start your R10 trial"
+      subtitle="R10 today, then your plan price from day 31. Cancel anytime."
     >
       <div className="space-y-5">
 
@@ -196,9 +196,9 @@ export default function CheckoutPage() {
         <div className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3.5">
           <Gift size={18} className="mt-0.5 shrink-0 text-primary" />
           <div className="text-sm">
-            <p className="font-bold text-primary">30-day free trial</p>
+            <p className="font-bold text-primary">30-day trial — R10 today</p>
             <p className="text-ink-secondary mt-0.5">
-              Enter your card details to activate. <strong>R0 charged today.</strong> Your card is billed automatically after 30 days. Cancel anytime before then.
+              <strong>R10 charged today</strong> to activate your trial. Your plan renews automatically from day 31. Cancel anytime before then.
             </p>
           </div>
         </div>
@@ -216,7 +216,7 @@ export default function CheckoutPage() {
           <div className="overflow-hidden rounded-2xl border border-primary/25 bg-primary-light">
             <div className="flex items-center justify-between px-5 pt-5 pb-3">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-primary/60">After trial</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-primary/60">From day 31</p>
                 <p className="mt-0.5 text-xl font-extrabold text-ink">{plan.name}</p>
               </div>
               <div className="text-right">
@@ -252,7 +252,7 @@ export default function CheckoutPage() {
           {paying ? (
             <><Loader2 size={16} className="animate-spin" /> Opening secure payment…</>
           ) : (
-            <><CreditCard size={16} /> Start Free Trial — R0 Today</>
+            <><CreditCard size={16} /> Start Trial — R10 Today</>
           )}
         </button>
 
@@ -295,7 +295,7 @@ export default function CheckoutPage() {
         </div>
 
         <p className="text-center text-xs text-ink-secondary">
-          30-day free trial, then billed monthly. Cancel anytime.
+          R10 trial today, then billed monthly from day 31. Cancel anytime.
         </p>
 
         <div className="border-t border-border pt-4 text-center">
