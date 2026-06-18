@@ -910,10 +910,11 @@ exports.createPayfastCheckout = onCall({
     cycles:            '0',                                 // indefinitely until cancelled
     custom_str1:       planKey,                             // plan key passed to IPN
   }
-  fields.signature = pfSignature(fields, isSandbox ? null : passphrase)
+  fields.signature = pfSignature(fields, null)
 
+  // POST body must use same encoding as signature (+ for spaces, not %20)
   const body = Object.entries(fields)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
 
   try {
