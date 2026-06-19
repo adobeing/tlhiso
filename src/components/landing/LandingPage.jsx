@@ -427,11 +427,10 @@ export default function LandingPage() {
                   </thead>
                   <tbody className="divide-y divide-border/50">
                     {[
-                      { guests: '50',   total: 'R345' },
-                      { guests: '100',  total: 'R690' },
-                      { guests: '300',  total: 'R2,070' },
-                      { guests: '500',  total: 'R3,450' },
-                      { guests: '1,000', total: 'R6,900' },
+                      { guests: '100',    total: 'R345' },
+                      { guests: '500',    total: 'R690' },
+                      { guests: '1,000',  total: 'R1,225' },
+                      { guests: '10,000', total: 'R5,450' },
                     ].map(row => (
                       <tr key={row.guests} className="hover:bg-surface-2/50">
                         <td className="px-5 py-3 font-semibold text-ink">{row.guests}</td>

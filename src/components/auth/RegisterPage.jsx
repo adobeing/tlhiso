@@ -79,8 +79,8 @@ export default function RegisterPage() {
         bankingDetails: null,
         createdAt: serverTimestamp(),
       })
-      // Redirect to checkout — user pays to activate their account
-      navigate('/checkout', { replace: true })
+      // Event Planners use pay-as-you-go — skip subscription checkout
+      navigate(industry === 'events' ? '/events' : '/checkout', { replace: true })
     } catch (err) {
       setFormError(friendlyAuthError(err))
       setStep(1)
@@ -142,8 +142,12 @@ export default function RegisterPage() {
           )}
           <div className="flex gap-3">
             <Button variant="ghost" type="button" onClick={() => setStep(1)}>Back</Button>
-            <Button type="button" onClick={() => setStep(3)} loading={false}
-              {...(!industry || !profession ? { disabled: true } : {})}>Continue</Button>
+            <Button type="button"
+              onClick={() => industry === 'events' ? finish() : setStep(3)}
+              loading={industry === 'events' ? submitting : false}
+              {...(!industry || !profession ? { disabled: true } : {})}>
+              {industry === 'events' ? 'Create account' : 'Continue'}
+            </Button>
           </div>
         </div>
       )}
