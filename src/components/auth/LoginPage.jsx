@@ -29,7 +29,9 @@ export default function LoginPage() {
     const snap = await getDoc(doc(db, 'users', uid))
     const data = snap.exists() ? snap.data() : null
     if (!data) return setFormError('Profile not found. Contact hello@tlhiso.com.')
-    if (!data.isActive) return navigate('/pending-activation')
+    if (!data.isActive) {
+      return navigate(data.industry === 'events' ? '/events/activate' : '/pending-activation')
+    }
     navigate(dashboardPathFor(data.industry))
   }
 
