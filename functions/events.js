@@ -306,3 +306,82 @@ exports.sendEventThankYou = onCall({
   await db().collection('events').doc(eventId).update({ status: 'completed', completedAt: admin.firestore.FieldValue.serverTimestamp() })
   return { success: true }
 })
+
+// One-time R50 activation payment for Event Planner accounts
+exports.createEventsActivationCheckout = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_MERCHANT_KEY', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Sign in required.')
+
+  const merchantId  = process.env.PAYFAST_MERCHANT_ID
+  const merchantKey = process.env.PAYFAST_MERCHANT_KEY
+  const passphrase  = process.env.PAYFAST_PASSPHRASE
+  const isSandbox   = merchantId === '10000100'
+  const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
+
+  const userSnap = await db().collection('users').doc(req.auth.uid).get()
+  const user = userSnap.exists ? userSnap.data() : {}
+  const nameParts = (user.name || req.auth.token?.name || 'Event Planner').trim().split(/\s+/)
+
+  const fields = {
+    merchant_id:   merchantId,
+    merchant_key:  merchantKey,
+    return_url:    'https://tlhiso.com/events',
+    cancel_url:    'https://tlhiso.com/events/activate',
+    notify_url:    'https://us-central1-tlhiso.cloudfunctions.net/eventsActivationIPN',
+    name_first:    nameParts[0],
+    name_last:     nameParts.slice(1).join(' ') || 'Planner',
+    email_address: user.email || req.auth.token?.email || '',
+    m_payment_id:  req.auth.uid,
+    amount:        '50.00',
+    item_name:     'Tlhiso Events — Account Activation',
+    custom_str1:   req.auth.uid,
+  }
+  fields.signature = pfSignature(fields, passphrase || null)
+
+  const body = Object.entries(fields)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
+    .join('&')
+
+  try {
+    const resp = await axios.post(`https://${host}/onsite/process`, body, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    })
+    if (!resp.data?.uuid) throw new Error(JSON.stringify(resp.data))
+    return { uuid: resp.data.uuid, sandbox: isSandbox }
+  } catch (e) {
+    const raw = typeof e.response?.data === 'string' ? e.response.data : ''
+    const text = raw.replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()
+    console.error('createEventsActivationCheckout error:', text.slice(0, 400) || e.message)
+    throw new HttpsError('internal', 'Payment setup failed. Please try again.')
+  }
+})
+
+// IPN handler — PayFast calls this after activation payment completes
+exports.eventsActivationIPN = onRequest({
+  secrets: ['PAYFAST_PASSPHRASE'],
+}, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return }
+  res.status(200).send('OK')
+
+  try {
+    const data = { ...req.body }
+    const receivedSig = data.signature
+    delete data.signature
+
+    const passphrase = process.env.PAYFAST_PASSPHRASE
+    const expectedSig = pfSignature(data, passphrase || null)
+    if (receivedSig !== expectedSig) { console.error('eventsActivationIPN: sig mismatch'); return }
+    if (data.payment_status !== 'COMPLETE') return
+
+    const uid = data.custom_str1
+    if (!uid) return
+    await db().collection('users').doc(uid).update({
+      isActive: true,
+      activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      activationMethod: 'events_payfast',
+    })
+  } catch (err) {
+    console.error('eventsActivationIPN error:', err)
+  }
+})

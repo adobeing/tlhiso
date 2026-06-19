@@ -17,7 +17,7 @@ import {
   Building2, HeartPulse, Map, ShoppingBag, Menu, X,
   Stethoscope, FileCheck, ArrowRightLeft, ClipboardSignature, HardHat,
   Star, Tag, List, CalendarClock, Zap, HelpCircle, Loader2, CheckCircle, Send, MessageSquare,
-  Wallet, Bot, PartyPopper, Plus,
+  Wallet, Bot, PartyPopper, Plus, User,
 } from 'lucide-react'
 
 const NAV_MAP = {
@@ -94,6 +94,8 @@ const NAV_MAP = {
   events: [
     { label: 'My Events', icon: Calendar,      to: '/events' },
     { label: 'New Event', icon: Plus,          to: '/events/new' },
+    { label: 'Profile',   icon: User,           to: '/events/profile' },
+    { label: 'Settings',  icon: Settings,      to: '/events/settings' },
   ],
 }
 

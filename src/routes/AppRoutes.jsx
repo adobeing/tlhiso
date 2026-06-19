@@ -22,6 +22,9 @@ import EventsDashboard from '../components/events/EventsDashboard'
 import EventEditor from '../components/events/EventEditor'
 import EventDetail from '../components/events/EventDetail'
 import EventInvitePublicPage from '../components/events/EventInvitePublicPage'
+import EventsActivatePage from '../components/events/EventsActivatePage'
+import EventsSettingsPage from '../components/events/EventsSettingsPage'
+import ProfilePage from '../components/shared/ProfilePage'
 
 export default function AppRoutes() {
   return (
@@ -72,7 +75,10 @@ export default function AppRoutes() {
       {/* Events (authenticated, no isActive gate) */}
       <Route element={<EventsRoute />}>
         <Route path="/events" element={<EventsDashboard />} />
+        <Route path="/events/activate" element={<EventsActivatePage />} />
         <Route path="/events/new" element={<EventEditor />} />
+        <Route path="/events/profile" element={<ProfilePage />} />
+        <Route path="/events/settings" element={<EventsSettingsPage />} />
         <Route path="/events/:eventId" element={<EventDetail />} />
         <Route path="/events/:eventId/edit" element={<EventEditor />} />
       </Route>

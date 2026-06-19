@@ -80,7 +80,7 @@ export default function RegisterPage() {
         createdAt: serverTimestamp(),
       })
       // Event Planners use pay-as-you-go — skip subscription checkout
-      navigate(industry === 'events' ? '/events' : '/checkout', { replace: true })
+      navigate(industry === 'events' ? '/events/activate' : '/checkout', { replace: true })
     } catch (err) {
       setFormError(friendlyAuthError(err))
       setStep(1)
