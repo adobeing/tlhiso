@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import Papa from 'papaparse'
-import { Plus, Trash2, Upload, Users, X } from 'lucide-react'
+import { Plus, Trash2, Upload, Users, X, Clock } from 'lucide-react'
 import DashboardLayout from '../shared/DashboardLayout'
 import { useAuth } from '../../contexts/AuthContext'
 import {
@@ -31,6 +31,16 @@ function ToggleRow({ label, description, checked, onChange }) {
   )
 }
 
+const EVENT_TYPES = [
+  { value: 'social', label: 'Social' },
+  { value: 'corporate_conference', label: 'Corporate Conference' },
+  { value: 'gala_dinner', label: 'Gala Dinner' },
+  { value: 'team_building', label: 'Team Building' },
+  { value: 'product_launch', label: 'Product Launch' },
+  { value: 'workshop', label: 'Workshop' },
+  { value: 'networking', label: 'Networking' },
+]
+
 export default function EventEditor() {
   const { eventId } = useParams()
   const isEdit = Boolean(eventId)
@@ -44,6 +54,7 @@ export default function EventEditor() {
       title: '', bio: '', locationName: '', locationAddress: '',
       startDate: '', endDate: '', ticketPriceZar: '',
       accommodationNearby: '', transportDetails: '',
+      eventType: 'social', dressCode: '', capacity: '',
     },
   })
 
@@ -59,11 +70,17 @@ export default function EventEditor() {
   const [guestName, setGuestName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
   const [guestPhone, setGuestPhone] = useState('')
+  const [guestCompany, setGuestCompany] = useState('')
+  const [guestJobTitle, setGuestJobTitle] = useState('')
+  const [guestTableNumber, setGuestTableNumber] = useState('')
   const [coverFile, setCoverFile] = useState(null)
   const [coverPreview, setCoverPreview] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [loadingEvent, setLoadingEvent] = useState(isEdit)
+
+  // Agenda state
+  const [agenda, setAgenda] = useState([])
 
   // Load existing event + guests in edit mode
   useEffect(() => {
@@ -83,6 +100,9 @@ export default function EventEditor() {
       setValue('ticketPriceZar', ev.ticketPriceZar || '')
       setValue('accommodationNearby', ev.accommodationNearby || '')
       setValue('transportDetails', ev.transportDetails || '')
+      setValue('eventType', ev.eventType || 'social')
+      setValue('dressCode', ev.dressCode || '')
+      setValue('capacity', ev.capacity || '')
       setIsMultiDay(!!ev.isMultiDay)
       setIsPaidEvent(!!ev.isPaidEvent)
       setIsFree(!!ev.isFree)
@@ -91,6 +111,7 @@ export default function EventEditor() {
       setCarpooling(!!ev.carpooling)
       setTransportProvided(!!ev.transportProvided)
       if (ev.coverImageUrl) setCoverPreview(ev.coverImageUrl)
+      if (ev.agenda) setAgenda(ev.agenda)
       setLoadingEvent(false)
     })
     return unsub
@@ -114,9 +135,19 @@ export default function EventEditor() {
     const name = guestName.trim()
     const email = guestEmail.trim()
     const phone = guestPhone.trim()
+    const company = guestCompany.trim()
+    const jobTitle = guestJobTitle.trim()
+    const tableNumber = guestTableNumber.trim()
     if (!name) return
-    setGuests(prev => [...prev, { _localId: crypto.randomUUID(), name, email, phone }])
+    setGuests(prev => [...prev, {
+      _localId: crypto.randomUUID(),
+      name, email, phone,
+      ...(company ? { company } : {}),
+      ...(jobTitle ? { jobTitle } : {}),
+      ...(tableNumber ? { tableNumber } : {}),
+    }])
     setGuestName(''); setGuestEmail(''); setGuestPhone('')
+    setGuestCompany(''); setGuestJobTitle(''); setGuestTableNumber('')
   }
 
   function removeGuest(localId, firestoreId) {
@@ -136,6 +167,9 @@ export default function EventEditor() {
             name:  (row.name  || row.Name  || '').trim(),
             email: (row.email || row.Email || '').trim(),
             phone: (row.phone || row.Phone || '').trim(),
+            company: (row.company || row.Company || '').trim() || undefined,
+            jobTitle: (row.jobTitle || row['Job Title'] || '').trim() || undefined,
+            tableNumber: (row.tableNumber || row['Table Number'] || '').trim() || undefined,
           }))
           .filter(g => g.name)
         setGuests(prev => [...prev, ...imported])
@@ -143,6 +177,19 @@ export default function EventEditor() {
       error: (err) => setSaveError('CSV parse error: ' + err.message),
     })
     e.target.value = ''
+  }
+
+  // Agenda helpers
+  function addAgendaItem() {
+    setAgenda(prev => [...prev, { _id: crypto.randomUUID(), time: '', title: '', description: '', speaker: '' }])
+  }
+
+  function updateAgendaItem(id, field, value) {
+    setAgenda(prev => prev.map(item => item._id === id ? { ...item, [field]: value } : item))
+  }
+
+  function removeAgendaItem(id) {
+    setAgenda(prev => prev.filter(item => item._id !== id))
   }
 
   const guestCount = guests.length
@@ -153,6 +200,16 @@ export default function EventEditor() {
     setSaving(true)
     setSaveError('')
     try {
+      // Clean up agenda — remove internal _id before saving
+      const cleanAgenda = agenda
+        .filter(item => item.title.trim())
+        .map(({ _id, ...rest }) => ({
+          time: rest.time || '',
+          title: rest.title.trim(),
+          description: rest.description || '',
+          speaker: rest.speaker || '',
+        }))
+
       const payload = {
         title: formData.title,
         bio: formData.bio || '',
@@ -172,6 +229,10 @@ export default function EventEditor() {
         transportDetails: transportProvided ? (formData.transportDetails || '') : '',
         allowPlusOne,
         collectsDietary,
+        eventType: formData.eventType || 'social',
+        dressCode: formData.dressCode || '',
+        capacity: formData.capacity ? parseInt(formData.capacity, 10) : null,
+        agenda: cleanAgenda,
       }
 
       let targetId = eventId
@@ -191,7 +252,14 @@ export default function EventEditor() {
       // Add new (local-only) guests to Firestore
       const newGuests = guests.filter(g => !g.id)
       for (const g of newGuests) {
-        await addGuest(targetId, { name: g.name, email: g.email || '', phone: g.phone || '' })
+        await addGuest(targetId, {
+          name: g.name,
+          email: g.email || '',
+          phone: g.phone || '',
+          ...(g.company ? { company: g.company } : {}),
+          ...(g.jobTitle ? { jobTitle: g.jobTitle } : {}),
+          ...(g.tableNumber ? { tableNumber: g.tableNumber } : {}),
+        })
       }
 
       navigate(`/events/${targetId}`)
@@ -256,6 +324,43 @@ export default function EventEditor() {
               {coverPreview ? 'Change cover image' : 'Upload cover image'}
             </button>
             <input ref={coverRef} type="file" accept="image/*" className="hidden" onChange={handleCoverChange} />
+          </div>
+        </div>
+
+        {/* Corporate / Event Type */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800">Event Type &amp; Format</h3>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Event Type</label>
+            <select
+              {...register('eventType')}
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            >
+              {EVENT_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Dress Code <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              {...register('dressCode')}
+              placeholder="e.g. Black tie, Smart casual"
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Max Capacity <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              type="number"
+              min="1"
+              {...register('capacity')}
+              placeholder="e.g. 200"
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
           </div>
         </div>
 
@@ -355,6 +460,82 @@ export default function EventEditor() {
           )}
         </div>
 
+        {/* Agenda / Programme */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-slate-800">Agenda / Programme</h3>
+            <button
+              type="button"
+              onClick={addAgendaItem}
+              className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/20"
+            >
+              <Plus size={13} />
+              Add item
+            </button>
+          </div>
+
+          {agenda.length === 0 && (
+            <p className="text-sm text-slate-400">No agenda items yet. Add items to display a programme on the invite page.</p>
+          )}
+
+          {agenda.map((item, idx) => (
+            <div key={item._id} className="rounded-2xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Item {idx + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAgendaItem(item._id)}
+                  className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Time</label>
+                  <div className="relative">
+                    <Clock size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={item.time}
+                      onChange={e => updateAgendaItem(item._id, 'time', e.target.value)}
+                      placeholder="e.g. 09:00"
+                      className="w-full rounded-xl border border-slate-200 py-2 pl-8 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Title <span className="text-red-400">*</span></label>
+                  <input
+                    value={item.title}
+                    onChange={e => updateAgendaItem(item._id, 'title', e.target.value)}
+                    placeholder="e.g. Welcome Address"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Speaker / Host <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input
+                  value={item.speaker}
+                  onChange={e => updateAgendaItem(item._id, 'speaker', e.target.value)}
+                  placeholder="e.g. Jane Smith, CEO"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                <textarea
+                  value={item.description}
+                  onChange={e => updateAgendaItem(item._id, 'description', e.target.value)}
+                  rows={2}
+                  placeholder="Brief description of this session"
+                  className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* RSVP options */}
         <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800">RSVP Options</h3>
@@ -399,12 +580,33 @@ export default function EventEditor() {
               type="email"
               className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
+            <input
+              value={guestPhone}
+              onChange={e => setGuestPhone(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addGuestManually())}
+              placeholder="Phone"
+              className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+            <input
+              value={guestCompany}
+              onChange={e => setGuestCompany(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addGuestManually())}
+              placeholder="Company (optional)"
+              className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+            <input
+              value={guestJobTitle}
+              onChange={e => setGuestJobTitle(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addGuestManually())}
+              placeholder="Job title (optional)"
+              className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
             <div className="flex gap-2">
               <input
-                value={guestPhone}
-                onChange={e => setGuestPhone(e.target.value)}
+                value={guestTableNumber}
+                onChange={e => setGuestTableNumber(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addGuestManually())}
-                placeholder="Phone"
+                placeholder="Table # (optional)"
                 className="flex-1 rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
               <button
@@ -426,7 +628,7 @@ export default function EventEditor() {
               className="flex items-center gap-2 rounded-2xl border border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-primary hover:text-primary"
             >
               <Upload size={14} />
-              Import CSV (name, email, phone)
+              Import CSV (name, email, phone, company, jobTitle, tableNumber)
             </button>
             <input ref={csvRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvImport} />
           </div>
@@ -444,7 +646,9 @@ export default function EventEditor() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-800">{g.name}</p>
-                    <p className="truncate text-xs text-slate-500">{[g.email, g.phone].filter(Boolean).join(' · ')}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {[g.email, g.phone, g.company, g.tableNumber ? `Table ${g.tableNumber}` : ''].filter(Boolean).join(' · ')}
+                    </p>
                   </div>
                   {!g.id && (
                     <button

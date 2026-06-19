@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { httpsCallable } from 'firebase/functions'
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
-import { Calendar, MapPin, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react'
+import { Calendar, MapPin, CheckCircle, AlertCircle, ExternalLink, Clock } from 'lucide-react'
 import { db, functions } from '../../services/firebase'
 
 export default function EventInvitePublicPage() {
@@ -107,6 +107,10 @@ export default function EventInvitePublicPage() {
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location.address)}`
     : null
 
+  // QR code for this guest's invite URL
+  const rsvpUrl = `https://tlhiso.com/e/${eventId}/${inviteToken}`
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(rsvpUrl)}`
+
   // ── Success ──
   if (submitted) {
     return (
@@ -122,6 +126,20 @@ export default function EventInvitePublicPage() {
             ? `You're going to ${event?.title}. We look forward to seeing you!`
             : `You've declined ${event?.title}. Thanks for letting us know.`}
         </p>
+
+        {/* QR code shown only when going */}
+        {rsvpStatus === 'going' && (
+          <div className="mt-8 flex flex-col items-center">
+            <p className="mb-3 text-sm font-semibold text-slate-700">Your entry QR code</p>
+            <img
+              src={qrSrc}
+              alt="Entry QR code"
+              className="h-48 w-48 rounded-2xl border border-slate-200 shadow-sm"
+            />
+            <p className="mt-2 text-xs text-slate-400">Screenshot this to use at the door</p>
+          </div>
+        )}
+
         <p className="mt-6 text-xs text-slate-400">
           Your response has been saved. You can update it by revisiting this link.
         </p>
@@ -177,26 +195,49 @@ export default function EventInvitePublicPage() {
               </div>
             )}
 
-            {/* Location */}
+            {/* Location with map embed */}
             {event?.location?.name && (
               <div className="flex items-start gap-3">
                 <MapPin size={16} className="mt-0.5 flex-shrink-0 text-primary" />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800">{event.location.name}</p>
                   {event.location.address && (
                     <p className="text-xs text-slate-500">{event.location.address}</p>
                   )}
-                  {mapsUrl && (
-                    <a
-                      href={mapsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                    >
-                      Open in Google Maps <ExternalLink size={11} />
-                    </a>
+                  {event?.location?.address && (
+                    <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200">
+                      <iframe
+                        title="Event location map"
+                        width="100%"
+                        height="160"
+                        style={{ border: 0, display: 'block' }}
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        src={`https://maps.google.com/maps?q=${encodeURIComponent(event.location.address)}&output=embed&z=15`}
+                        className="w-full"
+                      />
+                      {mapsUrl && (
+                        <a
+                          href={mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-slate-50"
+                        >
+                          <ExternalLink size={11} />
+                          Get Directions on Google Maps
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Dress code */}
+            {event?.dressCode && (
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">Dress Code</p>
+                <p className="text-sm text-slate-700">{event.dressCode}</p>
               </div>
             )}
 
@@ -222,6 +263,36 @@ export default function EventInvitePublicPage() {
                 {event.transportProvided && event.transportDetails && (
                   <p className="text-sm text-slate-700">{event.transportDetails}</p>
                 )}
+              </div>
+            )}
+
+            {/* Agenda / Programme */}
+            {event?.agenda?.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Programme</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {event.agenda.map((item, idx) => (
+                    <div key={idx} className="flex gap-3 px-4 py-3">
+                      {item.time && (
+                        <div className="flex items-start gap-1 flex-shrink-0 w-14 pt-0.5">
+                          <Clock size={11} className="mt-0.5 text-primary flex-shrink-0" />
+                          <span className="text-xs font-bold text-primary leading-tight">{item.time}</span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                        {item.speaker && (
+                          <p className="text-xs text-slate-500 mt-0.5">{item.speaker}</p>
+                        )}
+                        {item.description && (
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

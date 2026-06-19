@@ -43,8 +43,18 @@ export const INDUSTRIES = {
     basePath: '/retail/dashboard',
     professions: [
       'Salon / Beauty', 'Fitness Trainer / Gym', 'Restaurant / Food',
-      'Retail Store', 'Freelancer / Creative', 'Tutor / Coach',
-      'Event Planner', 'Other',
+      'Retail Store', 'Freelancer / Creative', 'Tutor / Coach', 'Other',
+    ],
+  },
+  events: {
+    key: 'events',
+    label: 'Event Planner',
+    icon: '🎪',
+    description: 'Plan and manage events — guest invites, RSVPs, check-in and more.',
+    basePath: '/events',
+    professions: [
+      'Corporate Event Planner', 'Wedding Planner', 'Conference Organiser',
+      'Party Planner', 'Venue Manager', 'Fundraiser / NGO', 'Other',
     ],
   },
 }

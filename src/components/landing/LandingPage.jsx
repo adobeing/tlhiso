@@ -27,6 +27,12 @@ const FEATURES = {
     { icon: '📊', title: 'Customer Insights', desc: 'Track customer visits, spend patterns, and birthdays for personalised outreach.' },
     { icon: '⭐', title: 'Feedback Surveys', desc: 'Collect customer satisfaction scores after every visit automatically.' },
   ],
+  events: [
+    { icon: '👥', title: 'Guest Management', desc: 'Add guests manually or import via CSV with company, table number, and job title.' },
+    { icon: '📧', title: 'Invitations & RSVPs', desc: 'Send branded email + SMS invites with personal RSVP links — guests confirm in one tap.' },
+    { icon: '📋', title: 'Agenda Builder', desc: 'Build a detailed event programme displayed on every guest\'s personal invite page.' },
+    { icon: '✅', title: 'Check-in & Name Tags', desc: 'Real-time guest check-in with QR codes and printable name tag PDFs — no extra apps.' },
+  ],
 }
 
 const TESTIMONIALS = [
@@ -60,6 +66,14 @@ const TESTIMONIALS = [
     company: 'Bongz Barbershop, Soweto',
     industry: 'Retail',
     quote: 'The weekly deals feature doubled my walk-ins. I send a WhatsApp blast Monday morning and I\'m fully booked by Wednesday.',
+    stars: 5,
+  },
+  {
+    name: 'Lerato Dlamini',
+    role: 'Corporate Event Planner',
+    company: 'Signature Events, Johannesburg',
+    industry: 'Events',
+    quote: 'I launched a 300-person gala in under an hour — invites, RSVPs, agenda, seating, and QR check-in, all from one place.',
     stars: 5,
   },
 ]
@@ -122,7 +136,7 @@ const PLANS = [
 ]
 
 const STATS = [
-  { value: '4', label: 'Industry verticals' },
+  { value: '5', label: 'Industry verticals' },
   { value: '3', label: 'Messaging channels' },
   { value: '10k', label: 'Campaign messages / month' },
   { value: '100%', label: 'South African' },
@@ -219,7 +233,7 @@ export default function LandingPage() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ink-secondary">
-            One platform for Medical practices, Property managers, B2B companies, and Consumer businesses.
+            One platform for Medical practices, Property managers, B2B companies, Consumer businesses, and Event Planners.
             Messaging, invoicing, scheduling — all in one place.
           </p>
 
@@ -256,7 +270,7 @@ export default function LandingPage() {
           {[
             { value: '500+',  label: 'SA businesses' },
             { value: '2M+',   label: 'Messages delivered' },
-            { value: '4',     label: 'Industries served' },
+            { value: '5',     label: 'Industries served' },
             { value: '4.9★',  label: 'Average rating' },
           ].map(s => (
             <div key={s.label}>
@@ -271,7 +285,7 @@ export default function LandingPage() {
       <section className="bg-white px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-14 text-center">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Four verticals. One platform.</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Five verticals. One platform.</p>
             <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Built for your industry</h2>
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -346,6 +360,92 @@ export default function LandingPage() {
                 <p className="text-xs text-ink-secondary">{ch.sub}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Events callout ── */}
+      <section className="bg-gradient-to-br from-[#f0f9f5] to-white px-6 py-24">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
+            {/* Left — copy */}
+            <div>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary-light px-4 py-1.5 text-xs font-semibold text-primary">
+                🎪 New — Events vertical
+              </div>
+              <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">
+                Host any event.<br />
+                <span className="text-primary">Pay per guest.</span>
+              </h2>
+              <p className="mt-4 text-base leading-relaxed text-ink-secondary">
+                No subscription required. Create your event, add guests, and pay only when you launch —
+                <strong className="text-ink"> R6 per guest + 15% VAT</strong>. Covers up to 3 touchpoints
+                per guest: invite, reminder, and thank-you.
+              </p>
+
+              <ul className="mt-8 space-y-3">
+                {[
+                  { icon: '📧', text: 'Branded email + SMS invitations with personal RSVP links' },
+                  { icon: '📋', text: 'Agenda builder displayed on every guest\'s invite page' },
+                  { icon: '🗺️', text: 'Google Maps embed so guests get directions in one tap' },
+                  { icon: '🔲', text: 'QR codes per guest for contactless check-in at the door' },
+                  { icon: '🏷️', text: 'Printable name tag PDFs — A4 landscape, 4 per page' },
+                  { icon: '🏢', text: 'Corporate fields: company, job title, table assignment, dress code' },
+                ].map(({ icon, text }) => (
+                  <li key={text} className="flex items-start gap-3 text-sm text-ink">
+                    <span className="mt-0.5 flex-shrink-0 text-base">{icon}</span>
+                    {text}
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-10 flex flex-wrap gap-3">
+                <Link to="/register"
+                  className="rounded-full bg-primary px-7 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#4e7d6d]">
+                  Host an event
+                </Link>
+                <Link to="/login"
+                  className="rounded-full border border-border bg-white px-7 py-3 text-sm font-semibold text-ink transition hover:bg-surface-2">
+                  Sign in →
+                </Link>
+              </div>
+            </div>
+
+            {/* Right — rate card */}
+            <div className="rounded-3xl border border-border/70 bg-white p-8 shadow-card">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-primary">Pricing</p>
+              <p className="text-3xl font-extrabold tracking-tight text-ink">R6 <span className="text-lg font-normal text-ink-secondary">/ guest</span></p>
+              <p className="mt-1 text-sm text-ink-secondary">+ 15% VAT · paid once at launch · no monthly fee</p>
+
+              <div className="mt-6 overflow-hidden rounded-2xl border border-border/60">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-surface-2 text-left text-xs font-bold uppercase tracking-wider text-ink-secondary">
+                      <th className="px-5 py-3">Guests</th>
+                      <th className="px-5 py-3">Total (incl. VAT)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {[
+                      { guests: '50',   total: 'R345' },
+                      { guests: '100',  total: 'R690' },
+                      { guests: '300',  total: 'R2,070' },
+                      { guests: '500',  total: 'R3,450' },
+                      { guests: '1,000', total: 'R6,900' },
+                    ].map(row => (
+                      <tr key={row.guests} className="hover:bg-surface-2/50">
+                        <td className="px-5 py-3 font-semibold text-ink">{row.guests}</td>
+                        <td className="px-5 py-3 font-bold text-primary">{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="mt-4 text-xs text-ink-secondary">
+                Each guest fee covers up to 3 touchpoints — invite, reminder, and thank-you — via email and SMS.
+              </p>
+            </div>
           </div>
         </div>
       </section>
