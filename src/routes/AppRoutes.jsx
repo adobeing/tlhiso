@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { PrivateRoute, ActiveUserRoute, IndustryRoute, SuperAdminRoute } from './guards'
+import { PrivateRoute, ActiveUserRoute, IndustryRoute, SuperAdminRoute, EventsRoute } from './guards'
 import LandingPage from '../components/landing/LandingPage'
 import LegalPage from '../components/landing/LegalPage'
 import SurveyPage from '../components/public/SurveyPage'
@@ -18,6 +18,10 @@ import MedicalDashboard from '../components/dashboards/medical/MedicalDashboard'
 import PropertyDashboard from '../components/dashboards/property/PropertyDashboard'
 import RetailDashboard from '../components/dashboards/retail/RetailDashboard'
 import SuperAdminDashboard from '../components/superadmin/SuperAdminDashboard'
+import EventsDashboard from '../components/events/EventsDashboard'
+import EventEditor from '../components/events/EventEditor'
+import EventDetail from '../components/events/EventDetail'
+import EventInvitePublicPage from '../components/events/EventInvitePublicPage'
 
 export default function AppRoutes() {
   return (
@@ -60,6 +64,17 @@ export default function AppRoutes() {
       {/* Super admin */}
       <Route element={<SuperAdminRoute />}>
         <Route path="/superadmin/*" element={<SuperAdminDashboard />} />
+      </Route>
+
+      {/* Public event invite page */}
+      <Route path="/e/:eventId/:inviteToken" element={<EventInvitePublicPage />} />
+
+      {/* Events (authenticated, no isActive gate) */}
+      <Route element={<EventsRoute />}>
+        <Route path="/events" element={<EventsDashboard />} />
+        <Route path="/events/new" element={<EventEditor />} />
+        <Route path="/events/:eventId" element={<EventDetail />} />
+        <Route path="/events/:eventId/edit" element={<EventEditor />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

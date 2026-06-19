@@ -901,8 +901,8 @@ exports.createPayfastCheckout = onCall({
     name_last:         nameParts.slice(1).join(' ') || 'User',
     email_address:     user.email,
     m_payment_id:      uid,
-    amount:            '10.00',                             // R10 charged today (trial fee)
-    item_name:         `${planData.name} — R10 Trial`,
+    amount:            '0.00',                              // R0 today — 30-day free trial
+    item_name:         `${planData.name} — 30-Day Free Trial`,
     subscription_type: '1',
     billing_date:      billingDate,                         // first real charge in 30 days
     recurring_amount:  planData.amount,                     // plan price every month after
@@ -910,7 +910,7 @@ exports.createPayfastCheckout = onCall({
     cycles:            '0',                                 // indefinitely until cancelled
     custom_str1:       planKey,                             // plan key passed to IPN
   }
-  fields.signature = pfSignature(fields, passphrase || null)
+  fields.signature = pfSignature(fields, null)
 
   // POST body must use same encoding as signature (+ for spaces, not %20)
   const body = Object.entries(fields)
@@ -926,9 +926,7 @@ exports.createPayfastCheckout = onCall({
     if (!resp.data?.uuid) throw new Error(JSON.stringify(resp.data))
     return { uuid: resp.data.uuid, sandbox: isSandbox }
   } catch (e) {
-    console.error('createPayfastCheckout status:', e.response?.status)
-    console.error('createPayfastCheckout response:', JSON.stringify(e.response?.data)?.slice(0, 500))
-    console.error('createPayfastCheckout message:', e.message)
+    console.error('createPayfastCheckout error', e.response?.data ?? e.message)
     throw new HttpsError('internal', 'Failed to initiate payment. Please try again.')
   }
 })
@@ -2583,3 +2581,7 @@ TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R).
 
   return { reply, history: contents }
 })
+
+// ── Events module ─────────────────────────────────────────────────────────────
+const eventsModule = require('./events.js')
+Object.assign(exports, eventsModule)

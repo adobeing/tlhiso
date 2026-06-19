@@ -56,3 +56,10 @@ export function SuperAdminRoute() {
   if (!isAuthenticated || !isSuperAdmin) return <Navigate to="/login" replace />
   return <Outlet />
 }
+
+export function EventsRoute() {
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) return <Spinner label="Loading events…" />
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <Outlet />
+}

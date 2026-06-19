@@ -17,7 +17,7 @@ import {
   Building2, HeartPulse, Map, ShoppingBag, Menu, X,
   Stethoscope, FileCheck, ArrowRightLeft, ClipboardSignature, HardHat,
   Star, Tag, List, CalendarClock, Zap, HelpCircle, Loader2, CheckCircle, Send, MessageSquare,
-  Wallet, Bot,
+  Wallet, Bot, PartyPopper, Plus,
 } from 'lucide-react'
 
 const NAV_MAP = {
@@ -91,9 +91,13 @@ const NAV_MAP = {
     { label: 'Support',        icon: MessageSquare,   to: '/superadmin/support' },
     { label: 'Settings',       icon: Settings,        to: '/superadmin/settings' },
   ],
+  events: [
+    { label: 'My Events', icon: Calendar,      to: '/events' },
+    { label: 'New Event', icon: Plus,          to: '/events/new' },
+  ],
 }
 
-const INDUSTRY_ICONS = { b2b: Building2, medical: HeartPulse, property: Map, retail: ShoppingBag, superadmin: ShieldCheck }
+const INDUSTRY_ICONS = { b2b: Building2, medical: HeartPulse, property: Map, retail: ShoppingBag, superadmin: ShieldCheck, events: PartyPopper }
 
 // Per-industry accent colour used for the sidebar top strip and topbar title indicator
 const INDUSTRY_ACCENT = {
@@ -102,6 +106,7 @@ const INDUSTRY_ACCENT = {
   property:   '#F97316',
   retail:     '#8B5CF6',
   superadmin: '#5B8E7D',
+  events:     '#5B8E7D',
 }
 
 const STATUS_DOT = {
