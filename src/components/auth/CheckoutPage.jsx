@@ -73,6 +73,8 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (loading) return
     if (!user && !isComplete) { navigate('/login', { replace: true }); return }
+    // Event Planners use PayFast pay-per-use — never the subscription checkout
+    if (profile?.industry === 'events') { navigate('/events/activate', { replace: true }); return }
     if (profile?.isActive) navigate(dashboardPathFor(profile.industry), { replace: true })
   }, [loading, user, profile, navigate, isComplete])
 
