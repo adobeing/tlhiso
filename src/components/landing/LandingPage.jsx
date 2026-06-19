@@ -415,7 +415,7 @@ export default function LandingPage() {
             <div className="rounded-3xl border border-border/70 bg-white p-8 shadow-card">
               <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-primary">Pricing</p>
               <p className="text-3xl font-extrabold tracking-tight text-ink">R6 <span className="text-lg font-normal text-ink-secondary">/ guest</span></p>
-              <p className="mt-1 text-sm text-ink-secondary">+ 15% VAT · paid once at launch · no monthly fee</p>
+              <p className="mt-1 text-sm text-ink-secondary">Paid once at launch · no monthly fee</p>
 
               <div className="mt-6 overflow-hidden rounded-2xl border border-border/60">
                 <table className="w-full text-sm">
