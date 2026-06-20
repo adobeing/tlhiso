@@ -39,7 +39,6 @@ exports.createEventCheckout = onCall({
 
   const merchantId  = process.env.PAYFAST_MERCHANT_ID
   const merchantKey = process.env.PAYFAST_MERCHANT_KEY
-  const passphrase  = process.env.PAYFAST_PASSPHRASE
   const isSandbox   = merchantId === '10000100'
   const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
 
@@ -52,19 +51,20 @@ exports.createEventCheckout = onCall({
     merchant_key: merchantKey,
     return_url:   `https://tlhiso.com/events/${eventId}`,
     cancel_url:   `https://tlhiso.com/events/${eventId}`,
-    notify_url:   `https://us-central1-tlhiso.cloudfunctions.net/eventPaymentIPN`,
+    notify_url:   'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
     name_first:   nameParts[0],
     name_last:    nameParts.slice(1).join(' ') || 'Organiser',
     email_address: user.email || req.auth.token?.email || '',
-    m_payment_id: eventId,
+    m_payment_id: `evt_${eventId}`,
     amount:       total,
-    item_name:    `${event.title || 'Event'} — ${guestCount} guests`,
+    item_name:    `${event.title || 'Event'} - ${guestCount} guests`,
     custom_str1:  eventId,
     custom_str2:  String(guestCount),
   }
-  fields.signature = pfSignature(fields, passphrase || null)
+  fields.signature = pfSignature(fields, process.env.PAYFAST_PASSPHRASE)
 
   const body = Object.entries(fields)
+    .filter(([, v]) => v !== '' && v != null)
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
 
@@ -96,8 +96,7 @@ exports.eventPaymentIPN = onRequest({
     const receivedSig = data.signature
     delete data.signature
 
-    const passphrase = process.env.PAYFAST_PASSPHRASE
-    const expectedSig = pfSignature(data, passphrase || null)
+    const expectedSig = pfSignature(data, process.env.PAYFAST_PASSPHRASE)
     if (receivedSig !== expectedSig) {
       console.error('eventPaymentIPN: signature mismatch')
       return
@@ -307,15 +306,24 @@ exports.sendEventThankYou = onCall({
   return { success: true }
 })
 
-// One-time R50 activation payment for Event Planner accounts
+const ACTIVATION_TIERS = {
+  '100':   { amount: '345.00',  label: '100 guests' },
+  '500':   { amount: '690.00',  label: '500 guests' },
+  '1000':  { amount: '1225.00', label: '1,000 guests' },
+  '10000': { amount: '5450.00', label: '10,000 guests' },
+}
+
 exports.createEventsActivationCheckout = onCall({
   secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_MERCHANT_KEY', 'PAYFAST_PASSPHRASE'],
 }, async (req) => {
   if (!req.auth) throw new HttpsError('unauthenticated', 'Sign in required.')
 
+  const tierKey = String(req.data?.guestTier || '')
+  const tier = ACTIVATION_TIERS[tierKey]
+  if (!tier) throw new HttpsError('invalid-argument', 'Select a valid guest tier.')
+
   const merchantId  = process.env.PAYFAST_MERCHANT_ID
   const merchantKey = process.env.PAYFAST_MERCHANT_KEY
-  const passphrase  = process.env.PAYFAST_PASSPHRASE
   const isSandbox   = merchantId === '10000100'
   const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
 
@@ -328,18 +336,19 @@ exports.createEventsActivationCheckout = onCall({
     merchant_key:  merchantKey,
     return_url:    'https://tlhiso.com/events',
     cancel_url:    'https://tlhiso.com/events/activate',
-    notify_url:    'https://us-central1-tlhiso.cloudfunctions.net/eventsActivationIPN',
+    notify_url:    'https://us-central1-tlhiso.cloudfunctions.net/payfastIPN',
     name_first:    nameParts[0],
     name_last:     nameParts.slice(1).join(' ') || 'Planner',
     email_address: user.email || req.auth.token?.email || '',
-    m_payment_id:  req.auth.uid,
-    amount:        '50.00',
-    item_name:     'Tlhiso Events — Account Activation',
+    m_payment_id:  `evtact_${req.auth.uid}`,
+    amount:        tier.amount,
+    item_name:     `Tlhiso Events - ${tier.label}`,
     custom_str1:   req.auth.uid,
   }
-  fields.signature = pfSignature(fields, passphrase || null)
+  fields.signature = pfSignature(fields, process.env.PAYFAST_PASSPHRASE)
 
   const body = Object.entries(fields)
+    .filter(([, v]) => v !== '' && v != null)
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
 
@@ -369,8 +378,7 @@ exports.eventsActivationIPN = onRequest({
     const receivedSig = data.signature
     delete data.signature
 
-    const passphrase = process.env.PAYFAST_PASSPHRASE
-    const expectedSig = pfSignature(data, passphrase || null)
+    const expectedSig = pfSignature(data, process.env.PAYFAST_PASSPHRASE)
     if (receivedSig !== expectedSig) { console.error('eventsActivationIPN: sig mismatch'); return }
     if (data.payment_status !== 'COMPLETE') return
 

@@ -48,6 +48,7 @@ export default function AppRoutes() {
         <Route path="/pending-activation" element={<PendingActivationPage />} />
         <Route path="/checkout" element={<CheckoutPage />} />
         <Route path="/checkout/complete" element={<CheckoutPage />} />
+        <Route path="/events/activate" element={<EventsActivatePage />} />
       </Route>
 
       {/* Industry dashboards */}
@@ -72,10 +73,9 @@ export default function AppRoutes() {
       {/* Public event invite page */}
       <Route path="/e/:eventId/:inviteToken" element={<EventInvitePublicPage />} />
 
-      {/* Events (authenticated, no isActive gate) */}
+      {/* Events (authenticated + eventsActivated/isActive gate) */}
       <Route element={<EventsRoute />}>
         <Route path="/events" element={<EventsDashboard />} />
-        <Route path="/events/activate" element={<EventsActivatePage />} />
         <Route path="/events/new" element={<EventEditor />} />
         <Route path="/events/profile" element={<ProfilePage />} />
         <Route path="/events/settings" element={<EventsSettingsPage />} />

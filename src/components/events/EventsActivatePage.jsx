@@ -19,25 +19,27 @@ function loadPayfastScript(sandbox) {
   })
 }
 
-const RATE_CARD = [
-  { guests: '100',    total: 'R345' },
-  { guests: '500',    total: 'R690' },
-  { guests: '1,000',  total: 'R1,225' },
-  { guests: '10,000', total: 'R5,450' },
+const TIERS = [
+  { key: '100',   guests: '100',    total: 'R345',   display: 'R345' },
+  { key: '500',   guests: '500',    total: 'R690',   display: 'R690' },
+  { key: '1000',  guests: '1,000',  total: 'R1,225', display: 'R1,225' },
+  { key: '10000', guests: '10,000', total: 'R5,450', display: 'R5,450' },
 ]
 
 export default function EventsActivatePage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [selected, setSelected] = useState(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
 
   async function handleActivate() {
+    if (!selected) return
     setLoading(true)
     setError('')
     try {
       const fn = httpsCallable(functions, 'createEventsActivationCheckout')
-      const result = await fn()
+      const result = await fn({ guestTier: selected.key })
       const { uuid, sandbox } = result.data
       await loadPayfastScript(sandbox)
       if (typeof window.payfast_do_onsite_payment !== 'function') {
@@ -45,11 +47,10 @@ export default function EventsActivatePage() {
       }
       window.payfast_do_onsite_payment({ uuid }, async (success) => {
         if (success) {
-          // Optimistic local update — IPN will also set isActive server-side
           try {
-            await updateDoc(doc(db, 'users', user.uid), { isActive: true })
+            await updateDoc(doc(db, 'users', user.uid), { isActive: true, eventsActivated: true })
           } catch (e) {
-            console.warn('Optimistic isActive update failed:', e.message)
+            console.warn('Optimistic update failed:', e.message)
           }
           navigate('/events', { replace: true })
         } else {
@@ -74,12 +75,13 @@ export default function EventsActivatePage() {
           </div>
           <h1 className="text-2xl font-black text-slate-900">Activate your Events account</h1>
           <p className="mt-2 text-sm text-slate-500">
-            One-time R50 activation fee · No monthly subscription · Pay per event launched
+            Select your expected guest count · R6/guest · No monthly subscription
           </p>
         </div>
 
         {/* Card */}
         <div className="rounded-3xl border border-slate-200/60 bg-white shadow-xl overflow-hidden">
+
           {/* What you get */}
           <div className="px-6 pt-6 pb-5 border-b border-slate-100">
             <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">What's included</p>
@@ -90,7 +92,7 @@ export default function EventsActivatePage() {
                 'RSVP tracking, agenda builder, Google Maps',
                 'QR check-in & printable name tag PDFs',
                 'Corporate fields: table numbers, dress code',
-                'Pay only when you launch (R6/guest)',
+                'Pay only when you launch (R6/guest + 15% VAT)',
               ].map(item => (
                 <li key={item} className="flex items-start gap-2.5 text-sm text-slate-700">
                   <CheckCircle size={15} className="mt-0.5 flex-shrink-0 text-primary" />
@@ -100,39 +102,39 @@ export default function EventsActivatePage() {
             </ul>
           </div>
 
-          {/* Price */}
-          <div className="px-6 py-4 border-b border-slate-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">Account activation (once-off)</p>
-                <p className="text-xs text-slate-400">Secure payment via PayFast</p>
-              </div>
-              <p className="text-2xl font-extrabold text-slate-900">R50</p>
+          {/* Tier selector */}
+          <div className="px-6 py-5 border-b border-slate-100">
+            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Select guest count</p>
+            <div className="space-y-2">
+              {TIERS.map(tier => {
+                const isSelected = selected?.key === tier.key
+                return (
+                  <button
+                    key={tier.key}
+                    type="button"
+                    onClick={() => setSelected(tier)}
+                    className={`w-full flex items-center justify-between rounded-2xl border px-4 py-3.5 text-left transition ${
+                      isSelected
+                        ? 'border-primary bg-primary/5 shadow-sm'
+                        : 'border-slate-200 hover:border-primary/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`h-4 w-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                        isSelected ? 'border-primary' : 'border-slate-300'
+                      }`}>
+                        {isSelected && <div className="h-2 w-2 rounded-full bg-primary" />}
+                      </div>
+                      <span className="text-sm font-semibold text-slate-800">{tier.guests} guests</span>
+                    </div>
+                    <span className={`text-sm font-bold ${isSelected ? 'text-primary' : 'text-slate-700'}`}>
+                      {tier.total}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-          </div>
-
-          {/* Rate card */}
-          <div className="px-6 py-4 border-b border-slate-100">
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-400">Per-event pricing</p>
-            <div className="overflow-hidden rounded-2xl border border-slate-100">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 text-left text-xs font-bold text-slate-400">
-                    <th className="px-4 py-2">Guests</th>
-                    <th className="px-4 py-2">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {RATE_CARD.map(row => (
-                    <tr key={row.guests}>
-                      <td className="px-4 py-2 text-slate-700">{row.guests}</td>
-                      <td className="px-4 py-2 font-semibold text-primary">{row.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-1.5 text-xs text-slate-400">R6/guest · one-time per event</p>
+            <p className="mt-2 text-xs text-slate-400">Prices include 15% VAT · R6 per guest</p>
           </div>
 
           {/* Error */}
@@ -148,15 +150,17 @@ export default function EventsActivatePage() {
             <button
               type="button"
               onClick={handleActivate}
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-bold text-white shadow-md shadow-primary/20 transition hover:bg-[#4e7d6d] disabled:opacity-60"
+              disabled={!selected || loading}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-bold text-white shadow-md shadow-primary/20 transition hover:bg-[#4e7d6d] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading
                 ? <><Loader2 size={16} className="animate-spin" /> Setting up payment…</>
-                : <><PartyPopper size={16} /> Activate — Pay R50</>}
+                : selected
+                  ? <><PartyPopper size={16} /> Pay {selected.display} with PayFast</>
+                  : <><PartyPopper size={16} /> Select a guest count above</>}
             </button>
             <p className="mt-3 text-center text-xs text-slate-400">
-              Secure payment via PayFast · R50 charged once · No recurring fees
+              Secure payment via PayFast · One-time per event · No recurring fees
             </p>
           </div>
         </div>

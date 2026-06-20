@@ -379,7 +379,7 @@ export default function LandingPage() {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-ink-secondary">
                 No subscription required. Create your event, add guests, and pay only when you launch —
-                <strong className="text-ink"> R6 per guest + 15% VAT</strong>. Covers up to 3 touchpoints
+                <strong className="text-ink"> R6 per guest</strong>. Covers up to 3 touchpoints
                 per guest: invite, reminder, and thank-you.
               </p>
 

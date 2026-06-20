@@ -882,7 +882,6 @@ exports.createPayfastCheckout = onCall({
 
   const merchantId  = process.env.PAYFAST_MERCHANT_ID
   const merchantKey = process.env.PAYFAST_MERCHANT_KEY
-  const passphrase  = process.env.PAYFAST_PASSPHRASE
   const isSandbox   = merchantId === '10000100'
   const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
 
@@ -901,19 +900,20 @@ exports.createPayfastCheckout = onCall({
     name_last:         nameParts.slice(1).join(' ') || 'User',
     email_address:     user.email,
     m_payment_id:      uid,
-    amount:            '0.00',                              // R0 today — 30-day free trial
-    item_name:         `${planData.name} — 30-Day Free Trial`,
+    amount:            '10.00',
+    item_name:         `${planData.name} - 30-Day Trial`,
+    custom_str1:       planKey,
+    custom_str2:       'trial',
     subscription_type: '1',
-    billing_date:      billingDate,                         // first real charge in 30 days
-    recurring_amount:  planData.amount,                     // plan price every month after
-    frequency:         '3',                                 // monthly
-    cycles:            '0',                                 // indefinitely until cancelled
-    custom_str1:       planKey,                             // plan key passed to IPN
+    billing_date:      billingDate,
+    recurring_amount:  planData.amount,
+    frequency:         '3',
+    cycles:            '0',
   }
-  fields.signature = pfSignature(fields, null)
+  fields.signature = pfSignature(fields, process.env.PAYFAST_PASSPHRASE)
 
-  // POST body must use same encoding as signature (+ for spaces, not %20)
   const body = Object.entries(fields)
+    .filter(([, v]) => v !== '' && v != null)
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
 
@@ -926,7 +926,10 @@ exports.createPayfastCheckout = onCall({
     if (!resp.data?.uuid) throw new Error(JSON.stringify(resp.data))
     return { uuid: resp.data.uuid, sandbox: isSandbox }
   } catch (e) {
-    console.error('createPayfastCheckout error', e.response?.data ?? e.message)
+    const raw = typeof e.response?.data === 'string' ? e.response.data : ''
+    const text = raw.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    console.error('createPayfastCheckout status:', e.response?.status)
+    console.error('createPayfastCheckout pf_text:', text.slice(0, 500) || e.message)
     throw new HttpsError('internal', 'Failed to initiate payment. Please try again.')
   }
 })
@@ -944,8 +947,7 @@ exports.payfastIPN = onRequest({
   delete data.signature
 
   // Verify signature
-  const passphrase = process.env.PAYFAST_PASSPHRASE
-  const expectedSig = pfSignature(data, passphrase)
+  const expectedSig = pfSignature(data, process.env.PAYFAST_PASSPHRASE)
   if (receivedSig !== expectedSig) {
     console.error('payfastIPN: signature mismatch', { received: receivedSig, expected: expectedSig })
     res.status(400).send('Invalid signature')
@@ -991,6 +993,53 @@ exports.payfastIPN = onRequest({
     return
   }
 
+  // Events activation payments: m_payment_id = evtact_<uid>
+  if (String(uid).startsWith('evtact_')) {
+    if (paymentStatus === 'COMPLETE') {
+      try {
+        const realUid = String(uid).slice('evtact_'.length)
+        const dupRef = db.collection('payfast_payments').doc(String(pfPaymentId || uid))
+        if (!(await dupRef.get()).exists) {
+          await db.doc(`users/${realUid}`).update({
+            isActive: true, eventsActivated: true,
+            paymentStatus: 'events', trialActive: false,
+          })
+          await dupRef.set({ uid: realUid, type: 'events_activation', amount: data.amount_gross ?? null, at: admin.firestore.Timestamp.now() })
+          console.log(`payfastIPN: events activation uid=${realUid}`)
+        }
+      } catch (e) {
+        console.error('payfastIPN evtact error', e.message)
+        res.status(500).send('Activation error')
+        return
+      }
+    }
+    res.status(200).send('OK'); return
+  }
+
+  // Per-event payments: m_payment_id = evt_<eventId>
+  if (String(uid).startsWith('evt_')) {
+    if (paymentStatus === 'COMPLETE') {
+      try {
+        const eventId = String(uid).slice('evt_'.length)
+        const dupRef = db.collection('payfast_payments').doc(String(pfPaymentId || uid))
+        if (!(await dupRef.get()).exists) {
+          await db.doc(`events/${eventId}`).update({
+            paymentStatus: 'paid', status: 'launched',
+            amountChargedZar: parseFloat(data.amount_gross || '0'),
+            launchedAt: admin.firestore.FieldValue.serverTimestamp(),
+          })
+          await dupRef.set({ eventId, type: 'event_launch', amount: data.amount_gross ?? null, at: admin.firestore.Timestamp.now() })
+          console.log(`payfastIPN: event launched eventId=${eventId}`)
+        }
+      } catch (e) {
+        console.error('payfastIPN evt error', e.message)
+        res.status(500).send('Event launch error')
+        return
+      }
+    }
+    res.status(200).send('OK'); return
+  }
+
   if (paymentStatus === 'COMPLETE') {
     try {
       const cfg = getConfig()
@@ -1000,7 +1049,7 @@ exports.payfastIPN = onRequest({
       const planKey   = data.custom_str1 || user.plan || 'starter'
       const pfToken   = data.token || null
       const amountGross = parseFloat(data.amount_gross || '0')
-      const isTrial   = amountGross < 1   // R0 initial charge = trial activation
+      const isTrial   = data.custom_str2 === 'trial' || amountGross <= 10
 
       const PLAN_QUOTAS = { starter: 1000, business: 3000, enterprise: 10000 }
 
@@ -1023,14 +1072,14 @@ exports.payfastIPN = onRequest({
           await sgMail.send({
             to: user.email,
             from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
-            subject: '🎉 Your 30-day free trial has started!',
+            subject: '🎉 Your 30-day Tlhiso trial has started!',
             html: `
               <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
                 <h2 style="color:#5B8E7D">Welcome to Tlhiso!</h2>
                 <p>Hi ${user.name || 'there'},</p>
-                <p>Your <strong>30-day free trial</strong> is now active. You have <strong>30 campaign messages</strong> to explore the platform.</p>
-                <p>Your first subscription charge of <strong>R${parseFloat(PLAN_PRICES[planKey]?.amount || 0).toLocaleString('en-ZA')}/month</strong> will be billed automatically on <strong>${trialEndsAt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.</p>
-                <p>You can cancel anytime before then with no charge.</p>
+                <p>Your <strong>30-day trial</strong> is now active. R10 was charged today to activate it. You have <strong>30 campaign messages</strong> to explore the platform.</p>
+                <p>Your first full subscription charge of <strong>R${parseFloat(PLAN_PRICES[planKey]?.amount || 0).toLocaleString('en-ZA')}/month</strong> will be billed automatically on <strong>${trialEndsAt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.</p>
+                <p>You can cancel anytime before then.</p>
                 <p style="margin:24px 0"><a href="https://tlhiso.com/login" style="background:#5B8E7D;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block">Go to my dashboard →</a></p>
                 <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
               </div>`,
@@ -1403,7 +1452,6 @@ exports.createPayfastTopup = onCall({
 
   const merchantId  = process.env.PAYFAST_MERCHANT_ID
   const merchantKey = process.env.PAYFAST_MERCHANT_KEY
-  const passphrase  = process.env.PAYFAST_PASSPHRASE
   const isSandbox   = merchantId === '10000100'
   const host        = isSandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'
 
@@ -1421,10 +1469,11 @@ exports.createPayfastTopup = onCall({
     amount:        bundle.amount,
     item_name:     bundle.name,
   }
-  fields.signature = pfSignature(fields, passphrase)
+  fields.signature = pfSignature(fields, process.env.PAYFAST_PASSPHRASE)
 
   const body = Object.entries(fields)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .filter(([, v]) => v !== '' && v != null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, '+')}`)
     .join('&')
 
   try {

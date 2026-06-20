@@ -58,8 +58,11 @@ export function SuperAdminRoute() {
 }
 
 export function EventsRoute() {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, profile, loading } = useAuth()
   if (loading) return <Spinner label="Loading events…" />
   if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (!profile?.eventsActivated && !profile?.isActive) {
+    return <Navigate to="/events/activate" replace />
+  }
   return <Outlet />
 }

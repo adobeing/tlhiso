@@ -141,6 +141,9 @@ firebase functions:secrets:set SECRET_NAME
 | `TWILIO_AUTH_TOKEN` | Twilio | ✅ Set |
 | `TWILIO_WHATSAPP_NUMBER` | Twilio WhatsApp | ✅ Set |
 | `TWILIO_NUMBER` | Twilio SMS | ✅ Set |
+| `PAYFAST_MERCHANT_ID` | PayFast | ✅ Set (live: `35654681`) |
+| `PAYFAST_MERCHANT_KEY` | PayFast | ✅ Set |
+| ~~`PAYFAST_PASSPHRASE`~~ | PayFast — **not used** | PayFast account has no passphrase set; all `pfSignature` calls use `null` |
 | ~~`ASSEMBLYAI_API_KEY`~~ | ~~AssemblyAI~~ — replaced by GCP Speech-to-Text | N/A |
 
 > Transcription (`transcribeConsultation`) now uses **Google Cloud Speech-to-Text** via the function's service account. No API key is required. Enable the API at: [console.cloud.google.com → APIs → Cloud Speech-to-Text API](https://console.cloud.google.com/apis/library/speech.googleapis.com)
@@ -160,6 +163,37 @@ All functions are **2nd Gen, Node 20, us-central1**.
 | `sendActivationEmail` | HTTPS Callable | Email user when Super Admin activates their account |
 | `deleteUserAccount` | HTTPS Callable | Deletes Firebase Auth account + Firestore doc (super admin only) |
 | `notifyOnUserCreated` | Firestore `users/{userId}` onCreate | Email admin + welcome email to new registrant |
+| `createPayfastCheckout` | HTTPS Callable | Creates PayFast Onsite subscription checkout (R10 trial → monthly plan) |
+| `payfastIPN` | HTTPS Request | PayFast IPN handler for subscription payments; activates user + sends trial email |
+| `createPayfastTopup` | HTTPS Callable | Creates PayFast Onsite one-off top-up for campaign message bundles |
+| `createEventCheckout` | HTTPS Callable | Creates PayFast Onsite one-off payment for event launch (R6/guest + 15% VAT) |
+| `eventPaymentIPN` | HTTPS Request | PayFast IPN handler for event launch payments; sets event status to launched |
+| `createEventsActivationCheckout` | HTTPS Callable | Creates PayFast Onsite one-off payment to activate Events account (tier-based) |
+| `eventsActivationIPN` | HTTPS Request | PayFast IPN handler for Events activation; sets `eventsActivated: true` on user |
+| `launchEvent` | HTTPS Callable | Marks event as launched after payment confirmed |
+| `submitRsvp` | HTTPS Callable | Public RSVP submission for event invites |
+| `sendEventReminder` | HTTPS Callable | Sends email/SMS reminders to event guests |
+| `sendEventThankYou` | HTTPS Callable | Sends post-event thank-you messages to guests |
+| `processBilling` | Cloud Scheduler | Monthly billing via PayFast recurring; triggered by Pub/Sub schedule |
+| `processScheduledCampaigns` | Cloud Scheduler | Fires scheduled campaigns at their send time |
+| `processRecurringCampaigns` | Cloud Scheduler | Fires recurring campaign instances |
+| `processAutomations` | Cloud Scheduler | Runs automation rules (birthday messages etc.) |
+| `suggestCampaign` | HTTPS Callable | Gemini-powered campaign suggestion for a user |
+| `sendAdminCampaign` | HTTPS Callable | Super admin broadcast campaign to all/filtered users |
+| `superAdminChat` | HTTPS Callable | Super admin Gemini AI agent (13 tools) |
+| `trackOpen` | HTTPS Request | Email open pixel tracker |
+| `trackClick` | HTTPS Request | Email link click tracker |
+| `shortenUrl` | HTTPS Callable | Shortens campaign URLs via is.gd |
+| `unsubscribeContact` | HTTPS Request | Handles unsubscribe link clicks |
+| `smsDeliveryWebhook` | HTTPS Request | BulkSMS delivery receipt webhook |
+| `smsInboundWebhook` | HTTPS Request | BulkSMS inbound SMS webhook |
+| `getPublicBookingInfo` | HTTPS Callable | Returns public booking page info for a user |
+| `getPublicBookingSlots` | HTTPS Callable | Returns available appointment slots |
+| `createPublicBooking` | HTTPS Callable | Creates a public appointment booking |
+| `getTenantPortal` | HTTPS Callable | Returns tenant portal data |
+| `createTenantMaintenance` | HTTPS Callable | Tenant submits a maintenance request |
+| `generateWeeklySuggestions` | Cloud Scheduler | Generates weekly AI campaign suggestions for all users |
+| `getProviderStats` | HTTPS Callable | Returns messaging provider stats for super admin |
 
 Callable usage from React:
 ```js
@@ -323,6 +357,8 @@ Point these records at your domain registrar:
 | 2026-06-02 | **Cloud Functions** — all 6 functions live | Node 20, 2nd gen. Secrets set in Secret Manager |
 | 2026-06-02 | **Firestore rules deployed** | Fixed `permission-denied` on profile load |
 | 2026-06-02 | **First user profile doc created** | `itupisces@gmail.com` / UID `0Lbs8DOCTXMb5oZpPxHdL6kr5IM2`, industry: medical, activated |
+| 2026-06-19 | **PayFast integration** — checkout, IPN, Events activation, recurring billing | `createPayfastCheckout`, `payfastIPN`, `createPayfastTopup`, Events functions; passphrase removed (PayFast account has none) |
+| 2026-06-19 | **Events dashboard** — tier-based activation page, EventsRoute guard, `eventsActivated` field | `src/components/events/`, `src/routes/guards.jsx`, `functions/events.js` |
 
 ---
 
@@ -335,6 +371,9 @@ Point these records at your domain registrar:
 | 2026-06-02 | Cloud Functions: `ERR_PACKAGE_PATH_NOT_EXPORTED` on `v2/auth` | `firebase-functions` v4 used; `onUserCreated` moved in v5 | Upgraded to `firebase-functions@latest`, replaced with `onDocumentCreated` Firestore trigger |
 | 2026-06-02 | `beforeUserCreated` deploy error: GCIP required | Blocking Auth functions need Identity Platform (paid) | Replaced with Firestore `onDocumentCreated` trigger on `users/{userId}` |
 | 2026-06-02 | Node 18 runtime decommissioned | `engines.node` was `"18"` in `functions/package.json` | Updated to `"20"` |
+| 2026-06-19 | PayFast `400 — Generated signature does not match` | PayFast account has **no passphrase** set; code was appending `&passphrase=Tlhiso2024Pass` to the signing string | All `pfSignature(fields, passphrase)` calls changed to `pfSignature(fields, null)`; `PAYFAST_PASSPHRASE` removed from all function secret bindings |
+| 2026-06-19 | PayFast signature mismatch (secondary) | `pfSignature` was sorting fields alphabetically but body builder used insertion order — PayFast Onsite verifies from the POST body in submission order | Removed `.sort()` from `pfSignature`; body and signature now both use insertion order |
+| 2026-06-20 | PayFast subscription checkout 400 "signature does not match" | `custom_str1`/`custom_str2` fields were placed after subscription fields (`subscription_type`, `billing_date`, etc.) — PayFast Onsite verifies in POST body order, so the field order in the code is the signing order | Moved `custom_str1`/`custom_str2` before subscription fields in `createPayfastCheckout`; confirmed working via isolation test (once-off succeeded, subscription with corrected order succeeded). Passphrase `Tlhiso2025Pass` set in both Secret Manager (version 6) and PayFast merchant portal. See `docs/payfast-integration.md`. |
 
 ---
 
