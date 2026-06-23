@@ -195,9 +195,11 @@ export default function LandingPage() {
       <nav className="sticky top-0 z-50 border-b border-border/60 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
           <img src="/tlhiso-logo.png" alt="Tlhiso" className="h-8 w-auto" />
-          <div className="hidden items-center gap-8 text-sm font-medium text-ink-secondary md:flex">
+          <div className="hidden items-center gap-6 text-sm font-medium text-ink-secondary md:flex">
             <a href="#features" className="transition hover:text-primary">Features</a>
-            <a href="#testimonials" className="transition hover:text-primary">Reviews</a>
+            <a href="#campaigns" className="transition hover:text-primary">Campaigns</a>
+            <a href="#bookings" className="transition hover:text-primary">Bookings</a>
+            <a href="#events" className="transition hover:text-primary">Events</a>
             <a href="#pricing" className="transition hover:text-primary">Pricing</a>
           </div>
           <div className="flex items-center gap-3">
@@ -305,8 +307,70 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Core platform features ── */}
+      <section className="bg-white px-6 py-20 border-t border-border/60">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-14 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Core tools</p>
+            <h2 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Everything your business needs</h2>
+            <p className="mx-auto mt-4 max-w-xl text-sm text-ink-secondary">From the first booking to the final invoice — Tlhiso handles the daily operations so you can focus on growth.</p>
+          </div>
+          <div className="grid gap-8 md:grid-cols-3">
+
+            <div id="bookings" className="scroll-mt-24 flex flex-col rounded-3xl border border-border/70 bg-white p-8 shadow-card">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-light text-3xl">📅</div>
+              <h2 className="mt-5 text-xl font-extrabold text-ink">Online Bookings</h2>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-ink-secondary">
+                Give customers a personal booking link and let them schedule appointments 24/7 — no phone calls required. Confirmations fire automatically the moment a booking is made.
+              </p>
+              <ul className="mt-5 space-y-2">
+                {['Real-time availability calendar', 'Instant SMS + email confirmation', 'Personal public booking link'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm text-ink">
+                    <span className="font-bold text-primary">✓</span> {f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/register" className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-primary transition hover:gap-2">Get started →</Link>
+            </div>
+
+            <div id="reminders" className="scroll-mt-24 flex flex-col rounded-3xl border border-border/70 bg-white p-8 shadow-card">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-light text-3xl">🔔</div>
+              <h2 className="mt-5 text-xl font-extrabold text-ink">Automated Reminders</h2>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-ink-secondary">
+                Reduce no-shows and late payments with automatic SMS and email reminders. Set them once — Tlhiso sends them on schedule, every time.
+              </p>
+              <ul className="mt-5 space-y-2">
+                {['Appointment SMS & email reminders', 'Invoice payment reminders', 'Birthday & anniversary messages'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm text-ink">
+                    <span className="font-bold text-primary">✓</span> {f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/register" className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-primary transition hover:gap-2">Get started →</Link>
+            </div>
+
+            <div id="invoicing" className="scroll-mt-24 flex flex-col rounded-3xl border border-border/70 bg-white p-8 shadow-card">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-light text-3xl">🧾</div>
+              <h2 className="mt-5 text-xl font-extrabold text-ink">Invoicing Made Easy</h2>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-ink-secondary">
+                Create VAT-compliant invoices, send them via email or WhatsApp, and track payments — all without a spreadsheet in sight.
+              </p>
+              <ul className="mt-5 space-y-2">
+                {['VAT-compliant PDF invoices', 'Send via email, SMS or WhatsApp', 'Payment tracking & statements'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm text-ink">
+                    <span className="font-bold text-primary">✓</span> {f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/register" className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-primary transition hover:gap-2">Get started →</Link>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
       {/* ── Features ── */}
-      <section id="features" className="bg-surface-2 px-6 py-24">
+      <section id="features" className="scroll-mt-24 bg-surface-2 px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-12 text-center">
             <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">What you get</p>
@@ -343,7 +407,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Messaging channels strip ── */}
-      <section className="border-y border-border/60 bg-white px-6 py-14">
+      <section id="campaigns" className="scroll-mt-24 border-y border-border/60 bg-white px-6 py-14">
         <div className="mx-auto max-w-4xl text-center">
           <p className="mb-8 text-xs font-semibold uppercase tracking-widest text-primary">Three channels. One inbox.</p>
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-12">
@@ -365,7 +429,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Events callout ── */}
-      <section className="bg-gradient-to-br from-[#f0f9f5] to-white px-6 py-24">
+      <section id="events" className="scroll-mt-24 bg-gradient-to-br from-[#f0f9f5] to-white px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
             {/* Left — copy */}
@@ -450,7 +514,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Testimonials ── */}
-      <section id="testimonials" className="bg-surface-2 px-6 py-24">
+      <section id="testimonials" className="scroll-mt-24 bg-surface-2 px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-14 text-center">
             <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Real customers</p>
@@ -494,7 +558,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Pricing ── */}
-      <section id="pricing" className="bg-white px-6 py-24">
+      <section id="pricing" className="scroll-mt-24 bg-white px-6 py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-14 text-center">
             <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Simple pricing</p>
@@ -587,6 +651,11 @@ export default function LandingPage() {
               <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-ink-secondary">Product</p>
               <ul className="space-y-2.5 text-sm text-ink-secondary">
                 <li><a href="#features" className="transition hover:text-primary">Features</a></li>
+                <li><a href="#campaigns" className="transition hover:text-primary">Direct Marketing</a></li>
+                <li><a href="#bookings" className="transition hover:text-primary">Online Bookings</a></li>
+                <li><a href="#reminders" className="transition hover:text-primary">Automated Reminders</a></li>
+                <li><a href="#invoicing" className="transition hover:text-primary">Invoicing</a></li>
+                <li><a href="#events" className="transition hover:text-primary">Corporate Events</a></li>
                 <li><a href="#pricing" className="transition hover:text-primary">Pricing</a></li>
                 <li><Link to="/register" className="transition hover:text-primary">Get Started</Link></li>
               </ul>
