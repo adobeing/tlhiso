@@ -4,14 +4,37 @@ import { useAuth } from '../../contexts/AuthContext'
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { deleteUser } from 'firebase/auth'
 import { db, auth } from '../../services/firebase'
-import { PLANS } from '../../utils/industries'
+import { PLANS, PLAN_LIST } from '../../utils/industries'
 import {
   User, Shield, Bell, CreditCard, Trash2, LogOut,
   AlertTriangle, CheckCircle, Mail, Lock, ChevronRight,
   Loader2, HelpCircle, ChevronDown, ShieldCheck, Settings2,
-  Copy, ExternalLink, CalendarDays, FileText,
+  Copy, ExternalLink, CalendarDays, FileText, PauseCircle, XCircle,
 } from 'lucide-react'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from '../../services/firebase'
 import PopiaModule from './PopiaModule'
+import Modal from './Modal'
+
+// Mirrors TOPUP_BUNDLES in functions/index.js — keep in sync if prices change
+const TOPUP_BUNDLE_LIST = [
+  { bundleKey: 't500',  amount: 200, messages: 500  },
+  { bundleKey: 't1000', amount: 380, messages: 1000 },
+  { bundleKey: 't2500', amount: 900, messages: 2500 },
+]
+
+function loadPayfastScript(sandbox) {
+  return new Promise(resolve => {
+    const src = sandbox
+      ? 'https://sandbox.payfast.co.za/onsite/engine.js'
+      : 'https://www.payfast.co.za/onsite/engine.js'
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
+    const s = document.createElement('script')
+    s.src = src
+    s.onload = resolve
+    document.body.appendChild(s)
+  })
+}
 
 // ── Section ───────────────────────────────────────────────────────────────────
 function Section({ icon: Icon, title, description, children, danger }) {
@@ -170,6 +193,12 @@ export default function SettingsPage({ industry }) {
   const [deleteError, setDeleteError] = useState('')
   const [activeTab,   setActiveTab]   = useState('settings')
   const [linkCopied,  setLinkCopied]  = useState(false)
+  const [planModalOpen,   setPlanModalOpen]   = useState(false)
+  const [selectedPlan,    setSelectedPlan]    = useState(null)
+  const [cancelModalOpen, setCancelModalOpen] = useState(false)
+  const [pauseModalOpen,  setPauseModalOpen]  = useState(false)
+  const [billingAction,   setBillingAction]   = useState(null)
+  const [billingMsg,      setBillingMsg]      = useState(null)
 
   const subCollection = { medical: 'patients', property: 'tenants' }[industry] ?? 'customers'
 
@@ -178,9 +207,12 @@ export default function SettingsPage({ industry }) {
   const used      = profile?.messagesUsed ?? 0
   const usagePct  = Math.min((used / planLimit) * 100, 100)
 
-  const emailNotifs = profile?.emailNotifications !== false
-  const smsNotifs   = profile?.smsNotifications   === true
-  const marketingOn = profile?.marketingOptOut    !== true
+  const emailNotifs    = profile?.emailNotifications !== false
+  const smsNotifs      = profile?.smsNotifications   === true
+  const marketingOn    = profile?.marketingOptOut    !== true
+  const topupMessages  = profile?.topupMessages ?? 0
+  const effectiveTotal = planLimit + topupMessages
+  const billingUsagePct = Math.min((used / Math.max(effectiveTotal, 1)) * 100, 100)
 
   async function toggle(key, currentValue) {
     if (!uid) return
@@ -219,6 +251,81 @@ export default function SettingsPage({ industry }) {
           : e.message
       )
     } finally { setDeleting(false) }
+  }
+
+  async function handleTopup(bundleKey) {
+    setBillingAction(`topup_${bundleKey}`)
+    setBillingMsg(null)
+    try {
+      const fn = httpsCallable(functions, 'createPayfastTopup')
+      const result = await fn({ bundleKey })
+      const { uuid, sandbox } = result.data
+      if (!uuid) throw new Error('No payment token returned.')
+      await loadPayfastScript(sandbox)
+      if (typeof window.payfast_do_onsite_payment !== 'function') {
+        throw new Error('PayFast could not be loaded. Check your connection.')
+      }
+      window.payfast_do_onsite_payment({ uuid }, (success) => {
+        setBillingAction(null)
+        if (success) setBillingMsg({ type: 'success', text: 'Top-up purchased! Your message quota will update shortly.' })
+      })
+    } catch (e) {
+      setBillingMsg({ type: 'error', text: e.message || 'Payment setup failed. Please try again.' })
+      setBillingAction(null)
+    }
+  }
+
+  async function handleCancelSubscription() {
+    setBillingAction('cancel')
+    setBillingMsg(null)
+    try {
+      const result = await httpsCallable(functions, 'cancelSubscription')()
+      if (!result.data.success) throw new Error(result.data.error)
+      setBillingMsg({ type: 'success', text: 'Subscription cancelled. Access continues until end of your billing period.' })
+      setCancelModalOpen(false)
+    } catch (e) {
+      setBillingMsg({ type: 'error', text: e.message || 'Could not cancel. Please try again.' })
+    } finally { setBillingAction(null) }
+  }
+
+  async function handlePauseSubscription() {
+    setBillingAction('pause')
+    setBillingMsg(null)
+    try {
+      const result = await httpsCallable(functions, 'pauseSubscription')({ cycles: 1 })
+      if (!result.data.success) throw new Error(result.data.error)
+      setBillingMsg({ type: 'success', text: 'Subscription paused for 1 billing cycle.' })
+      setPauseModalOpen(false)
+    } catch (e) {
+      setBillingMsg({ type: 'error', text: e.message || 'Could not pause. Please try again.' })
+    } finally { setBillingAction(null) }
+  }
+
+  async function handleResume() {
+    setBillingAction('resume')
+    setBillingMsg(null)
+    try {
+      const result = await httpsCallable(functions, 'resumeSubscription')()
+      if (!result.data.success) throw new Error(result.data.error)
+      setBillingMsg({ type: 'success', text: 'Subscription resumed.' })
+    } catch (e) {
+      setBillingMsg({ type: 'error', text: e.message || 'Could not resume. Please try again.' })
+    } finally { setBillingAction(null) }
+  }
+
+  async function handleChangePlan() {
+    if (!selectedPlan) return
+    setBillingAction('changePlan')
+    setBillingMsg(null)
+    try {
+      const result = await httpsCallable(functions, 'changeSubscriptionPlan')({ planKey: selectedPlan })
+      if (!result.data.success) throw new Error(result.data.error)
+      setBillingMsg({ type: 'success', text: `Plan changed to ${PLANS[selectedPlan]?.name}. Takes effect next billing cycle.` })
+      setPlanModalOpen(false)
+      setSelectedPlan(null)
+    } catch (e) {
+      setBillingMsg({ type: 'error', text: e.message || 'Could not change plan. Please try again.' })
+    } finally { setBillingAction(null) }
   }
 
   const planBadgeColor = { starter: 'gray', business: 'blue', enterprise: 'purple' }
@@ -475,8 +582,10 @@ export default function SettingsPage({ industry }) {
 
       {/* ── Plan & Billing (full width) ──────────────────────────────────── */}
       <Section icon={CreditCard} title="Plan & Billing" description="Subscription and message quota">
-        <div className="px-6 py-5">
-          <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="space-y-5 px-6 py-5">
+
+          {/* Plan header */}
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-base font-bold text-ink">{plan?.name ?? 'Starter'}</p>
               <p className="mt-0.5 text-2xl font-extrabold text-primary">
@@ -487,22 +596,29 @@ export default function SettingsPage({ industry }) {
             <Badge color={planBadgeColor[profile?.plan ?? 'starter']}>{plan?.name}</Badge>
           </div>
 
-          <div className="mb-1 flex items-center justify-between text-xs font-semibold text-ink-secondary">
-            <span>Campaign message usage</span>
-            <span>{used.toLocaleString('en-ZA')} / {planLimit.toLocaleString('en-ZA')}</span>
+          {/* Usage bar — shows effective limit (plan + topup) */}
+          <div>
+            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-ink-secondary">
+              <span>Campaign message usage</span>
+              <span>{used.toLocaleString('en-ZA')} / {effectiveTotal.toLocaleString('en-ZA')}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${billingUsagePct > 90 ? 'bg-red-500' : billingUsagePct > 70 ? 'bg-amber-500' : 'bg-primary'}`}
+                style={{ width: `${billingUsagePct}%` }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-ink-secondary">
+              <span className="font-semibold text-ink">{Math.max(0, effectiveTotal - used).toLocaleString('en-ZA')}</span> campaign messages remaining this period
+              {topupMessages > 0 && (
+                <span className="ml-1 text-primary">({planLimit.toLocaleString('en-ZA')} plan + {topupMessages.toLocaleString('en-ZA')} top-up)</span>
+              )}
+            </p>
+            <p className="mt-0.5 text-[11px] text-ink-secondary/70">Booking confirmations &amp; appointment reminders are free and do not count toward this quota.</p>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-surface-2">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${usagePct > 90 ? 'bg-red-500' : usagePct > 70 ? 'bg-amber-500' : 'bg-primary'}`}
-              style={{ width: `${usagePct}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-ink-secondary">
-            <span className="font-semibold text-ink">{Math.max(0, planLimit - used).toLocaleString('en-ZA')}</span> campaign messages remaining this period
-          </p>
-          <p className="mt-0.5 text-[11px] text-ink-secondary/70">Booking confirmations & appointment reminders are free and do not count toward this quota.</p>
 
-          <div className="mt-4 border-t border-border pt-4">
+          {/* Plan features */}
+          <div className="border-t border-border pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary">Included in your plan</p>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5">
               {[
@@ -520,10 +636,119 @@ export default function SettingsPage({ industry }) {
             </ul>
           </div>
 
-          <p className="mt-4 rounded-xl bg-surface-2 px-4 py-3 text-xs text-ink-secondary">
-            To upgrade your plan or discuss billing, email{' '}
-            <a href="mailto:hello@tlhiso.com" className="font-semibold text-primary hover:underline">hello@tlhiso.com</a>.
-          </p>
+          {/* ── Inline billing feedback ─────────────────────────────────── */}
+          {billingMsg && (
+            <div className={`rounded-xl border px-4 py-3 text-sm ${billingMsg.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
+              {billingMsg.text}
+            </div>
+          )}
+
+          {/* ── Top-up bundles ─────────────────────────────────────────── */}
+          <div className="border-t border-border pt-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-secondary">Buy more messages</p>
+            <div className="grid grid-cols-3 gap-3">
+              {TOPUP_BUNDLE_LIST.map(b => (
+                <button
+                  key={b.bundleKey}
+                  onClick={() => handleTopup(b.bundleKey)}
+                  disabled={!!billingAction}
+                  className="flex flex-col items-start gap-0.5 rounded-xl border border-border bg-white px-4 py-3 text-left shadow-sm transition hover:border-primary hover:shadow-md disabled:opacity-50"
+                >
+                  <span className="text-base font-extrabold text-ink">{b.messages.toLocaleString('en-ZA')}</span>
+                  <span className="text-[11px] text-ink-secondary">messages</span>
+                  <span className="mt-1.5 text-sm font-bold text-primary">R{b.amount.toLocaleString('en-ZA')}</span>
+                  {billingAction === `topup_${b.bundleKey}` && (
+                    <Loader2 size={13} className="mt-1 animate-spin text-primary" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Change plan (only when subscribed via PayFast) ─────────── */}
+          {profile?.pfSubscriptionToken && profile?.paymentStatus !== 'cancelled' && (
+            <div className="border-t border-border pt-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-secondary">Change plan</p>
+              <div className="grid grid-cols-3 gap-3">
+                {PLAN_LIST.map(p => (
+                  <button
+                    key={p.key}
+                    disabled={p.key === profile?.plan || !!billingAction}
+                    onClick={() => { setSelectedPlan(p.key); setPlanModalOpen(true) }}
+                    className={`rounded-xl border px-4 py-3 text-left transition ${
+                      p.key === profile?.plan
+                        ? 'cursor-default border-primary bg-primary-light'
+                        : 'border-border bg-white hover:border-primary hover:shadow-md disabled:opacity-50'
+                    }`}
+                  >
+                    <p className="text-sm font-bold text-ink">{p.name}</p>
+                    <p className="text-xs font-semibold text-primary">R{p.price.toLocaleString('en-ZA')}/mo</p>
+                    {p.key === profile?.plan && (
+                      <p className="mt-1 text-[11px] font-semibold text-primary">Current</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-ink-secondary/70">Plan changes take effect at the next billing cycle.</p>
+            </div>
+          )}
+
+          {/* ── Subscription management controls ───────────────────────── */}
+          {profile?.pfSubscriptionToken && (
+            <div className="border-t border-border pt-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-secondary">Subscription management</p>
+
+              {profile?.paymentStatus === 'cancelled' ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+                  <p className="text-sm font-semibold text-amber-800">Subscription cancelled</p>
+                  <p className="mt-1 text-xs text-amber-700">Your access continues until the end of your current billing period.</p>
+                  <button
+                    onClick={() => navigate('/checkout')}
+                    className="mt-3 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white transition hover:bg-primary/90"
+                  >
+                    Resubscribe
+                  </button>
+                </div>
+              ) : profile?.paymentStatus === 'paused' ? (
+                <button
+                  onClick={handleResume}
+                  disabled={!!billingAction}
+                  className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/5 disabled:opacity-50"
+                >
+                  {billingAction === 'resume' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                  Resume subscription
+                </button>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => setPauseModalOpen(true)}
+                    disabled={!!billingAction}
+                    className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    {billingAction === 'pause' ? <Loader2 size={14} className="animate-spin" /> : <PauseCircle size={14} />}
+                    Pause subscription
+                  </button>
+                  <button
+                    onClick={() => setCancelModalOpen(true)}
+                    disabled={!!billingAction}
+                    className="flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {billingAction === 'cancel' ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+                    Cancel subscription
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* EFT / no-token users: keep the email prompt */}
+          {!profile?.pfSubscriptionToken && (
+            <p className="rounded-xl bg-surface-2 px-4 py-3 text-xs text-ink-secondary">
+              To upgrade your plan or discuss billing, email{' '}
+              <a href="mailto:hello@tlhiso.com" className="font-semibold text-primary hover:underline">hello@tlhiso.com</a>.
+            </p>
+          )}
+
         </div>
       </Section>
 
@@ -622,6 +847,97 @@ export default function SettingsPage({ industry }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Cancel subscription modal */}
+      <Modal open={cancelModalOpen} onClose={() => setCancelModalOpen(false)} title="Cancel subscription?">
+        <div className="space-y-4">
+          <p className="text-sm text-ink-secondary">
+            Your subscription will be cancelled at PayFast. You'll keep full dashboard access until the end of your current billing period, then your account will lapse.
+          </p>
+          <p className="text-sm text-ink-secondary">You can resubscribe at any time.</p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setCancelModalOpen(false)}
+              className="flex-1 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink transition hover:bg-surface-2"
+            >
+              Keep subscription
+            </button>
+            <button
+              onClick={handleCancelSubscription}
+              disabled={billingAction === 'cancel'}
+              className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+            >
+              {billingAction === 'cancel'
+                ? <Loader2 size={15} className="animate-spin mx-auto" />
+                : 'Cancel subscription'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Pause subscription modal */}
+      <Modal open={pauseModalOpen} onClose={() => setPauseModalOpen(false)} title="Pause subscription?">
+        <div className="space-y-4">
+          <p className="text-sm text-ink-secondary">
+            Your subscription will be paused for 1 billing cycle. No payment will be taken during that period. You can resume at any time from this page.
+          </p>
+          <p className="text-sm text-ink-secondary">Your dashboard access remains active while paused.</p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setPauseModalOpen(false)}
+              className="flex-1 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink transition hover:bg-surface-2"
+            >
+              Keep active
+            </button>
+            <button
+              onClick={handlePauseSubscription}
+              disabled={billingAction === 'pause'}
+              className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-40"
+            >
+              {billingAction === 'pause'
+                ? <Loader2 size={15} className="animate-spin mx-auto" />
+                : 'Pause for 1 cycle'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Change plan modal */}
+      {selectedPlan && (
+        <Modal
+          open={planModalOpen}
+          onClose={() => { setPlanModalOpen(false); setSelectedPlan(null) }}
+          title={`Switch to ${PLANS[selectedPlan]?.name}?`}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-ink-secondary">
+              Your recurring charge will change to{' '}
+              <strong>R{PLANS[selectedPlan]?.price?.toLocaleString('en-ZA')}/month</strong>{' '}
+              ({PLANS[selectedPlan]?.name} plan). This takes effect at your next billing date.
+            </p>
+            <p className="text-sm text-ink-secondary">
+              Your message quota updates to {PLANS[selectedPlan]?.messages?.toLocaleString('en-ZA')} messages/month when the next payment processes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPlanModalOpen(false); setSelectedPlan(null) }}
+                className="flex-1 rounded-xl border border-border py-2.5 text-sm font-semibold text-ink transition hover:bg-surface-2"
+              >
+                Keep current plan
+              </button>
+              <button
+                onClick={handleChangePlan}
+                disabled={billingAction === 'changePlan'}
+                className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-40"
+              >
+                {billingAction === 'changePlan'
+                  ? <Loader2 size={15} className="animate-spin mx-auto" />
+                  : `Switch to ${PLANS[selectedPlan]?.name}`}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
     </div>

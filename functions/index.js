@@ -2631,6 +2631,224 @@ TONE: Confident, direct, growth-minded. South African English. Currency ZAR (R).
   return { reply, history: contents }
 })
 
+// ── PayFast Subscription REST API ─────────────────────────────────────────────
+// Separate from the Onsite flow. REST API authenticates with sorted params + sig.
+// DO NOT reuse pfSignature here — Onsite uses insertion order; REST uses alpha sort.
+
+function pfApiSignature(headersObj, bodyObj, passphrase) {
+  const all = { ...headersObj, ...bodyObj }
+  const str = Object.keys(all)
+    .sort()
+    .filter(k => all[k] !== undefined && all[k] !== null && String(all[k]) !== '')
+    .map(k => `${k}=${encodeURIComponent(String(all[k])).replace(/%20/g, '+')}`)
+    .join('&')
+  const pp = passphrase ? passphrase.trim() : null
+  const toSign = pp
+    ? `${str}&passphrase=${encodeURIComponent(pp).replace(/%20/g, '+')}`
+    : str
+  return crypto.createHash('md5').update(toSign).digest('hex')
+}
+
+async function pfApiRequest({ method, path, bodyObj = {}, merchantId, passphrase, sandbox }) {
+  const host      = sandbox ? 'https://api.sandbox.payfast.co.za' : 'https://api.payfast.co.za'
+  const timestamp = new Date().toISOString()
+  const version   = 'v1'
+  const headersForSig = { 'merchant-id': merchantId, timestamp, version }
+  const sig = pfApiSignature(headersForSig, bodyObj, passphrase)
+  const reqConfig = {
+    method,
+    url: `${host}${path}`,
+    headers: {
+      'merchant-id': merchantId,
+      timestamp,
+      version,
+      signature: sig,
+      'Content-Type': 'application/json',
+    },
+  }
+  if (method !== 'GET' && Object.keys(bodyObj).length > 0) reqConfig.data = bodyObj
+  const resp = await axios(reqConfig)
+  return resp.data
+}
+
+// ── cancelSubscription ────────────────────────────────────────────────────────
+// Cancel-at-period-end: PayFast stops future charges but current period runs out.
+// isActive stays true so the user keeps dashboard access until lapse.
+exports.cancelSubscription = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_PASSPHRASE', 'SENDGRID_API_KEY'],
+}, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+  try {
+    const snap = await db.doc(`users/${uid}`).get()
+    const user = snap.data()
+    if (!user) return { success: false, error: 'User not found.' }
+
+    const token = user.pfSubscriptionToken
+    if (!token) return { success: false, error: 'No active subscription token found.' }
+    if (user.paymentStatus === 'cancelled') return { success: false, error: 'Subscription is already cancelled.' }
+
+    const merchantId = process.env.PAYFAST_MERCHANT_ID
+    const sandbox    = merchantId === '10000100'
+
+    await pfApiRequest({
+      method: 'PUT', path: `/subscriptions/${token}/cancel`, bodyObj: {},
+      merchantId, passphrase: process.env.PAYFAST_PASSPHRASE, sandbox,
+    })
+
+    await db.doc(`users/${uid}`).update({ paymentStatus: 'cancelled' })
+
+    try {
+      const cfg = getConfig()
+      sgMail.setApiKey(cfg.sendgridKey)
+      await sgMail.send({
+        to:   user.email,
+        from: { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+        subject: 'Your Tlhiso subscription has been cancelled',
+        html: `
+          <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+            <h2 style="color:#5B8E7D">Subscription Cancelled</h2>
+            <p>Hi ${user.name || 'there'},</p>
+            <p>Your Tlhiso subscription has been cancelled. You'll retain full access until the end of your current billing period.</p>
+            <p>Want to continue? You can resubscribe at any time from your Settings page.</p>
+            <p style="color:#64748B;font-size:12px;margin-top:24px;">Questions? <a href="mailto:hello@tlhiso.com" style="color:#5B8E7D">hello@tlhiso.com</a></p>
+          </div>`,
+      })
+    } catch (emailErr) { console.error('cancelSubscription email error', emailErr.message) }
+
+    return { success: true }
+  } catch (e) {
+    console.error('cancelSubscription error', e.response?.data ?? e.message)
+    return { success: false, error: 'Could not cancel subscription. Please try again or contact support.' }
+  }
+})
+
+// ── pauseSubscription ─────────────────────────────────────────────────────────
+exports.pauseSubscription = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  requireAuth(req)
+  const uid    = req.auth.uid
+  const cycles = Math.max(1, Math.min(12, Number(req.data?.cycles ?? 1)))
+  try {
+    const snap = await db.doc(`users/${uid}`).get()
+    const user = snap.data()
+    if (!user) return { success: false, error: 'User not found.' }
+
+    const token = user.pfSubscriptionToken
+    if (!token)                              return { success: false, error: 'No active subscription token found.' }
+    if (user.paymentStatus === 'paused')     return { success: false, error: 'Subscription is already paused.' }
+    if (user.paymentStatus === 'cancelled')  return { success: false, error: 'Cannot pause a cancelled subscription.' }
+
+    const merchantId = process.env.PAYFAST_MERCHANT_ID
+    const sandbox    = merchantId === '10000100'
+
+    await pfApiRequest({
+      method: 'PUT', path: `/subscriptions/${token}/pause`, bodyObj: { cycles },
+      merchantId, passphrase: process.env.PAYFAST_PASSPHRASE, sandbox,
+    })
+
+    // PayFast quirk: unpausing early does NOT move the next billing date.
+    // Access control while paused is the app's responsibility — we surface
+    // paymentStatus:'paused' in the UI so the user knows their state.
+    await db.doc(`users/${uid}`).update({
+      paymentStatus: 'paused',
+      pausedCycles:  cycles,
+      pausedAt:      admin.firestore.FieldValue.serverTimestamp(),
+    })
+
+    return { success: true }
+  } catch (e) {
+    console.error('pauseSubscription error', e.response?.data ?? e.message)
+    return { success: false, error: 'Could not pause subscription. Please try again or contact support.' }
+  }
+})
+
+// ── resumeSubscription ────────────────────────────────────────────────────────
+exports.resumeSubscription = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+  try {
+    const snap = await db.doc(`users/${uid}`).get()
+    const user = snap.data()
+    if (!user) return { success: false, error: 'User not found.' }
+
+    const token = user.pfSubscriptionToken
+    if (!token)                            return { success: false, error: 'No active subscription token found.' }
+    if (user.paymentStatus !== 'paused')   return { success: false, error: 'Subscription is not currently paused.' }
+
+    const merchantId = process.env.PAYFAST_MERCHANT_ID
+    const sandbox    = merchantId === '10000100'
+
+    await pfApiRequest({
+      method: 'PUT', path: `/subscriptions/${token}/unpause`, bodyObj: {},
+      merchantId, passphrase: process.env.PAYFAST_PASSPHRASE, sandbox,
+    })
+
+    await db.doc(`users/${uid}`).update({
+      paymentStatus: 'active',
+      pausedCycles:  admin.firestore.FieldValue.delete(),
+      pausedAt:      admin.firestore.FieldValue.delete(),
+    })
+
+    return { success: true }
+  } catch (e) {
+    console.error('resumeSubscription error', e.response?.data ?? e.message)
+    return { success: false, error: 'Could not resume subscription. Please try again or contact support.' }
+  }
+})
+
+// ── changeSubscriptionPlan ────────────────────────────────────────────────────
+// Updates the recurring_amount on PayFast then updates Firestore.
+// Quota change takes effect on the next billing cycle via the IPN path.
+// Do NOT reset messagesUsed here.
+exports.changeSubscriptionPlan = onCall({
+  secrets: ['PAYFAST_MERCHANT_ID', 'PAYFAST_PASSPHRASE'],
+}, async (req) => {
+  requireAuth(req)
+  const uid = req.auth.uid
+  const { planKey } = req.data ?? {}
+
+  if (!PLAN_PRICES[planKey]) {
+    return { success: false, error: 'Invalid plan. Choose starter, business, or enterprise.' }
+  }
+
+  try {
+    const snap = await db.doc(`users/${uid}`).get()
+    const user = snap.data()
+    if (!user) return { success: false, error: 'User not found.' }
+
+    const token = user.pfSubscriptionToken
+    if (!token) {
+      return {
+        success: false,
+        error:   'No subscription token on record. This may be an EFT account — email hello@tlhiso.com to change your plan.',
+      }
+    }
+
+    if (user.plan === planKey) return { success: false, error: 'You are already on this plan.' }
+
+    const planData   = PLAN_PRICES[planKey]
+    const merchantId = process.env.PAYFAST_MERCHANT_ID
+    const sandbox    = merchantId === '10000100'
+
+    await pfApiRequest({
+      method: 'PATCH', path: `/subscriptions/${token}/update`,
+      bodyObj: { amount: parseFloat(planData.amount) },
+      merchantId, passphrase: process.env.PAYFAST_PASSPHRASE, sandbox,
+    })
+
+    await db.doc(`users/${uid}`).update({ plan: planKey })
+
+    return { success: true }
+  } catch (e) {
+    console.error('changeSubscriptionPlan error', e.response?.data ?? e.message)
+    return { success: false, error: 'Could not change plan. Please try again or contact support.' }
+  }
+})
+
 // ── Events module ─────────────────────────────────────────────────────────────
 const eventsModule = require('./events.js')
 Object.assign(exports, eventsModule)
