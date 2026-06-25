@@ -189,20 +189,33 @@ exports.launchEvent = onCall({}, async (req) => {
 
 // Submit RSVP (public — no auth, called from EventInvitePublicPage)
 exports.submitRsvp = onCall({}, async (req) => {
-  const { eventId, inviteToken, rsvpStatus, plusOneName, dietary } = req.data
-  if (!eventId || !inviteToken || !rsvpStatus) throw new HttpsError('invalid-argument', 'Missing fields.')
+  const {
+    eventId, inviteToken, guestId,
+    rsvpStatus, plusOneName, plusOneCount, dietary, customAnswers, guestMessage,
+  } = req.data
+  if (!eventId || !rsvpStatus) throw new HttpsError('invalid-argument', 'Missing fields.')
+  if (!inviteToken && !guestId) throw new HttpsError('invalid-argument', 'Missing inviteToken or guestId.')
 
-  const guestsSnap = await db().collection('events').doc(eventId).collection('guests')
-    .where('inviteToken', '==', inviteToken).limit(1).get()
-
-  if (guestsSnap.empty) throw new HttpsError('not-found', 'Invite not found.')
-  const gDoc = guestsSnap.docs[0]
+  let gDoc
+  if (guestId) {
+    const snap = await db().collection('events').doc(eventId).collection('guests').doc(guestId).get()
+    if (!snap.exists) throw new HttpsError('not-found', 'Guest not found.')
+    gDoc = snap
+  } else {
+    const guestsSnap = await db().collection('events').doc(eventId).collection('guests')
+      .where('inviteToken', '==', inviteToken).limit(1).get()
+    if (guestsSnap.empty) throw new HttpsError('not-found', 'Invite not found.')
+    gDoc = guestsSnap.docs[0]
+  }
 
   await gDoc.ref.update({
     rsvpStatus,
     respondedAt: admin.firestore.FieldValue.serverTimestamp(),
     ...(plusOneName !== undefined ? { plusOne: true, plusOneName } : {}),
+    ...(plusOneCount !== undefined ? { plusOneCount } : {}),
     ...(dietary !== undefined ? { dietary } : {}),
+    ...(customAnswers !== undefined ? { customAnswers } : {}),
+    ...(guestMessage !== undefined ? { guestMessage } : {}),
   })
   return { success: true }
 })

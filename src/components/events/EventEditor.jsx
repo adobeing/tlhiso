@@ -9,6 +9,8 @@ import {
   createEvent, updateEvent, uploadCoverImage,
   addGuest, getGuests, watchEvent,
   quoteForGuests, GUEST_PRICE_ZAR, VAT_RATE,
+  getTables, addTable, updateTable, removeTable,
+  blankTier, blankQuestion, tierCapacity, tiersSold, tierRevenue,
 } from '../../services/events'
 
 function ToggleRow({ label, description, checked, onChange }) {
@@ -41,6 +43,9 @@ const EVENT_TYPES = [
   { value: 'networking', label: 'Networking' },
 ]
 
+const INPUT_CLS = 'w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20'
+const SMALL_INPUT_CLS = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20'
+
 export default function EventEditor() {
   const { eventId } = useParams()
   const isEdit = Boolean(eventId)
@@ -52,12 +57,19 @@ export default function EventEditor() {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
       title: '', bio: '', locationName: '', locationAddress: '',
-      startDate: '', endDate: '', ticketPriceZar: '',
+      startDate: '', endDate: '', startTime: '', endTime: '',
+      ticketPriceZar: '',
       accommodationNearby: '', transportDetails: '',
       eventType: 'social', dressCode: '', capacity: '',
+      maxPlusOnes: '', rsvpDeadline: '', guestMessage: '',
+      parkingInfo: '', accessibilityInfo: '',
+      livestreamUrl: '', giftRegistryUrl: '',
+      hashtag: '', whatsappContact: '',
+      reminderDaysBefore: '2',
     },
   })
 
+  // Existing toggles
   const [isMultiDay, setIsMultiDay] = useState(false)
   const [isPaidEvent, setIsPaidEvent] = useState(false)
   const [isFree, setIsFree] = useState(false)
@@ -66,6 +78,19 @@ export default function EventEditor() {
   const [carpooling, setCarpooling] = useState(false)
   const [transportProvided, setTransportProvided] = useState(false)
 
+  // New toggles
+  const [useTiers, setUseTiers] = useState(false)
+  const [rsvpRequired, setRsvpRequired] = useState(true)
+  const [isHybrid, setIsHybrid] = useState(false)
+  const [autoReminder, setAutoReminder] = useState(true)
+
+  // New repeatable state
+  const [ticketTiers, setTicketTiers] = useState([])
+  const [customQuestions, setCustomQuestions] = useState([])
+  const [localTables, setLocalTables] = useState([])
+  const [savedTables, setSavedTables] = useState([])
+
+  // Existing guest/cover/agenda state
   const [guests, setGuests] = useState([])
   const [guestName, setGuestName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
@@ -78,8 +103,6 @@ export default function EventEditor() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [loadingEvent, setLoadingEvent] = useState(isEdit)
-
-  // Agenda state
   const [agenda, setAgenda] = useState([])
 
   // Load existing event + guests in edit mode
@@ -97,12 +120,24 @@ export default function EventEditor() {
       setValue('endDate', ev.endDate
         ? (ev.endDate.toDate ? ev.endDate.toDate().toISOString().slice(0, 10) : ev.endDate)
         : '')
+      setValue('startTime', ev.startTime || '')
+      setValue('endTime', ev.endTime || '')
       setValue('ticketPriceZar', ev.ticketPriceZar || '')
       setValue('accommodationNearby', ev.accommodationNearby || '')
       setValue('transportDetails', ev.transportDetails || '')
       setValue('eventType', ev.eventType || 'social')
       setValue('dressCode', ev.dressCode || '')
       setValue('capacity', ev.capacity || '')
+      setValue('maxPlusOnes', ev.maxPlusOnes ?? '')
+      setValue('rsvpDeadline', ev.rsvpDeadline || '')
+      setValue('guestMessage', ev.guestMessage || '')
+      setValue('parkingInfo', ev.parkingInfo || '')
+      setValue('accessibilityInfo', ev.accessibilityInfo || '')
+      setValue('livestreamUrl', ev.livestreamUrl || '')
+      setValue('giftRegistryUrl', ev.giftRegistryUrl || '')
+      setValue('hashtag', ev.hashtag || '')
+      setValue('whatsappContact', ev.whatsappContact || '')
+      setValue('reminderDaysBefore', ev.reminderDaysBefore ?? '2')
       setIsMultiDay(!!ev.isMultiDay)
       setIsPaidEvent(!!ev.isPaidEvent)
       setIsFree(!!ev.isFree)
@@ -110,6 +145,12 @@ export default function EventEditor() {
       setCollectsDietary(!!ev.collectsDietary)
       setCarpooling(!!ev.carpooling)
       setTransportProvided(!!ev.transportProvided)
+      setUseTiers(!!ev.useTiers)
+      setTicketTiers(ev.ticketTiers || [])
+      setRsvpRequired(ev.rsvpRequired !== false)
+      setCustomQuestions(ev.customQuestions || [])
+      setIsHybrid(!!ev.isHybrid)
+      setAutoReminder(ev.autoReminder !== false)
       if (ev.coverImageUrl) setCoverPreview(ev.coverImageUrl)
       if (ev.agenda) setAgenda(ev.agenda)
       setLoadingEvent(false)
@@ -120,6 +161,14 @@ export default function EventEditor() {
   useEffect(() => {
     if (!isEdit) return
     getGuests(eventId).then(setGuests).catch(console.error)
+  }, [isEdit, eventId])
+
+  useEffect(() => {
+    if (!isEdit) return
+    getTables(eventId).then(tables => {
+      setSavedTables(tables)
+      setLocalTables(tables.map(t => ({ ...t })))
+    }).catch(console.error)
   }, [isEdit, eventId])
 
   function handleCoverChange(e) {
@@ -192,6 +241,45 @@ export default function EventEditor() {
     setAgenda(prev => prev.filter(item => item._id !== id))
   }
 
+  // Tier helpers
+  function addTierRow() {
+    setTicketTiers(prev => [...prev, blankTier()])
+  }
+
+  function updateTierRow(id, field, value) {
+    setTicketTiers(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t))
+  }
+
+  function removeTierRow(id) {
+    setTicketTiers(prev => prev.filter(t => t.id !== id))
+  }
+
+  // Table helpers
+  function addTableRow() {
+    setLocalTables(prev => [...prev, { _localId: crypto.randomUUID(), name: '', seats: '', notes: '' }])
+  }
+
+  function updateTableRow(key, field, value) {
+    setLocalTables(prev => prev.map(t => (t.id === key || t._localId === key) ? { ...t, [field]: value } : t))
+  }
+
+  function removeTableRow(key) {
+    setLocalTables(prev => prev.filter(t => t.id !== key && t._localId !== key))
+  }
+
+  // Question helpers
+  function addQuestion() {
+    setCustomQuestions(prev => [...prev, blankQuestion()])
+  }
+
+  function updateQuestion(id, field, value) {
+    setCustomQuestions(prev => prev.map(q => q.id === id ? { ...q, [field]: value } : q))
+  }
+
+  function removeQuestion(id) {
+    setCustomQuestions(prev => prev.filter(q => q.id !== id))
+  }
+
   const guestCount = guests.length
   const quote = quoteForGuests(guestCount)
 
@@ -200,7 +288,6 @@ export default function EventEditor() {
     setSaving(true)
     setSaveError('')
     try {
-      // Clean up agenda — remove internal _id before saving
       const cleanAgenda = agenda
         .filter(item => item.title.trim())
         .map(({ _id, ...rest }) => ({
@@ -218,20 +305,43 @@ export default function EventEditor() {
           address: formData.locationAddress || '',
         },
         startDate: formData.startDate || null,
+        startTime: formData.startTime || '',
+        endTime: formData.endTime || '',
         isMultiDay,
         endDate: isMultiDay ? (formData.endDate || null) : null,
         isPaidEvent,
         isFree,
-        ticketPriceZar: isPaidEvent ? (parseFloat(formData.ticketPriceZar) || 0) : null,
+        ticketPriceZar: isPaidEvent && !useTiers ? (parseFloat(formData.ticketPriceZar) || 0) : null,
+        useTiers: isPaidEvent ? useTiers : false,
+        ticketTiers: isPaidEvent && useTiers ? ticketTiers.map(t => ({
+          id: t.id, name: t.name, priceZar: Number(t.priceZar) || 0,
+          quantity: Number(t.quantity) || 0, sold: Number(t.sold) || 0,
+        })) : [],
         accommodationNearby: formData.accommodationNearby || '',
         carpooling,
         transportProvided,
         transportDetails: transportProvided ? (formData.transportDetails || '') : '',
+        parkingInfo: formData.parkingInfo || '',
+        accessibilityInfo: formData.accessibilityInfo || '',
         allowPlusOne,
         collectsDietary,
+        rsvpRequired,
+        maxPlusOnes: allowPlusOne && formData.maxPlusOnes ? parseInt(formData.maxPlusOnes, 10) : null,
+        rsvpDeadline: formData.rsvpDeadline || '',
+        guestMessage: formData.guestMessage || '',
+        customQuestions: customQuestions.map(q => ({
+          id: q.id, label: q.label, type: q.type, options: q.options, required: q.required,
+        })),
         eventType: formData.eventType || 'social',
         dressCode: formData.dressCode || '',
         capacity: formData.capacity ? parseInt(formData.capacity, 10) : null,
+        isHybrid,
+        livestreamUrl: isHybrid ? (formData.livestreamUrl || '') : '',
+        giftRegistryUrl: formData.giftRegistryUrl || '',
+        hashtag: (formData.hashtag || '').replace(/^#/, ''),
+        whatsappContact: formData.whatsappContact || '',
+        autoReminder,
+        reminderDaysBefore: autoReminder ? (parseInt(formData.reminderDaysBefore, 10) || 2) : null,
         agenda: cleanAgenda,
       }
 
@@ -243,10 +353,29 @@ export default function EventEditor() {
         targetId = ref.id
       }
 
-      // Upload cover if selected
       if (coverFile && targetId) {
         const url = await uploadCoverImage(targetId, coverFile)
         await updateEvent(targetId, { coverImageUrl: url })
+      }
+
+      // Sync tables subcollection
+      const tableRemoveIds = savedTables
+        .filter(st => !localTables.find(lt => lt.id === st.id))
+        .map(st => st.id)
+      for (const tId of tableRemoveIds) {
+        await removeTable(targetId, tId)
+      }
+      for (const t of localTables.filter(lt => !!lt.id)) {
+        await updateTable(targetId, t.id, {
+          name: t.name || '', seats: Number(t.seats) || 0, notes: t.notes || '',
+        })
+      }
+      for (const t of localTables.filter(lt => !lt.id)) {
+        if (t.name.trim()) {
+          await addTable(targetId, {
+            name: t.name || '', seats: Number(t.seats) || 0, notes: t.notes || '',
+          })
+        }
       }
 
       // Add new (local-only) guests to Firestore
@@ -294,7 +423,7 @@ export default function EventEditor() {
             <input
               {...register('title', { required: 'Title is required' })}
               placeholder="e.g. Annual Staff Gala"
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
             {errors.title && <p className="mt-1 text-xs text-red-500">{errors.title.message}</p>}
           </div>
@@ -327,7 +456,7 @@ export default function EventEditor() {
           </div>
         </div>
 
-        {/* Corporate / Event Type */}
+        {/* Event Type & Format */}
         <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800">Event Type &amp; Format</h3>
 
@@ -335,7 +464,7 @@ export default function EventEditor() {
             <label className="mb-1.5 block text-sm font-semibold text-slate-700">Event Type</label>
             <select
               {...register('eventType')}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             >
               {EVENT_TYPES.map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>
@@ -348,7 +477,7 @@ export default function EventEditor() {
             <input
               {...register('dressCode')}
               placeholder="e.g. Black tie, Smart casual"
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
           </div>
 
@@ -359,7 +488,7 @@ export default function EventEditor() {
               min="1"
               {...register('capacity')}
               placeholder="e.g. 200"
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
           </div>
         </div>
@@ -372,7 +501,7 @@ export default function EventEditor() {
             <input
               {...register('locationName')}
               placeholder="e.g. Sandton Convention Centre"
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
           </div>
           <div>
@@ -380,12 +509,12 @@ export default function EventEditor() {
             <input
               {...register('locationAddress')}
               placeholder="e.g. 161 Maude St, Sandton"
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
           </div>
         </div>
 
-        {/* Dates */}
+        {/* Date & Time */}
         <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800">Date &amp; Time</h3>
           <div>
@@ -393,8 +522,26 @@ export default function EventEditor() {
             <input
               type="date"
               {...register('startDate')}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={INPUT_CLS}
             />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Start Time <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="time"
+                {...register('startTime')}
+                className={INPUT_CLS}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">End Time <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="time"
+                {...register('endTime')}
+                className={INPUT_CLS}
+              />
+            </div>
           </div>
           <ToggleRow
             label="Multi-day event"
@@ -408,7 +555,7 @@ export default function EventEditor() {
               <input
                 type="date"
                 {...register('endDate')}
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className={INPUT_CLS}
               />
             </div>
           )}
@@ -420,18 +567,158 @@ export default function EventEditor() {
           <ToggleRow label="Free event" checked={isFree} onChange={setIsFree} />
           <ToggleRow label="Paid event (ticket price)" checked={isPaidEvent} onChange={setIsPaidEvent} />
           {isPaidEvent && (
-            <div>
-              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Ticket Price (ZAR)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                {...register('ticketPriceZar')}
-                placeholder="0.00"
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            <>
+              <ToggleRow
+                label="Use ticket tiers"
+                description="Multiple ticket categories with separate pricing (display/tracking only)"
+                checked={useTiers}
+                onChange={setUseTiers}
               />
-            </div>
+              {!useTiers ? (
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">Ticket Price (ZAR)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    {...register('ticketPriceZar')}
+                    placeholder="0.00"
+                    className={INPUT_CLS}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {ticketTiers.map(tier => (
+                    <div key={tier.id} className="rounded-2xl border border-slate-200 p-3 grid gap-2 sm:grid-cols-4 items-end">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Tier name</label>
+                        <input
+                          value={tier.name}
+                          onChange={e => updateTierRow(tier.id, 'name', e.target.value)}
+                          placeholder="e.g. VIP"
+                          className={SMALL_INPUT_CLS}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Price (ZAR)</label>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={tier.priceZar}
+                          onChange={e => updateTierRow(tier.id, 'priceZar', e.target.value)}
+                          placeholder="0.00"
+                          className={SMALL_INPUT_CLS}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Qty available</label>
+                        <input
+                          type="number" min="0"
+                          value={tier.quantity}
+                          onChange={e => updateTierRow(tier.id, 'quantity', e.target.value)}
+                          placeholder="0"
+                          className={SMALL_INPUT_CLS}
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Sold</label>
+                          <input
+                            type="number" min="0"
+                            value={tier.sold}
+                            onChange={e => updateTierRow(tier.id, 'sold', e.target.value)}
+                            placeholder="0"
+                            className={SMALL_INPUT_CLS}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeTierRow(tier.id)}
+                          className="mb-0.5 self-end rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addTierRow}
+                    className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/20"
+                  >
+                    <Plus size={13} /> Add tier
+                  </button>
+                  {ticketTiers.length > 0 && (
+                    <div className="rounded-2xl bg-primary/5 px-4 py-3 text-sm">
+                      <p className="font-semibold text-slate-700">
+                        Capacity: {tierCapacity(ticketTiers)} · Sold: {tiersSold(ticketTiers)} · Revenue: R{tierRevenue(ticketTiers).toLocaleString('en-ZA')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
+        </div>
+
+        {/* Seating & Tables */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-slate-800">Seating &amp; Tables</h3>
+            <button
+              type="button"
+              onClick={addTableRow}
+              className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/20"
+            >
+              <Plus size={13} /> Add table
+            </button>
+          </div>
+          {localTables.length === 0 && (
+            <p className="text-sm text-slate-400">No tables yet. Add tables to enable seating assignments.</p>
+          )}
+          {localTables.map(t => {
+            const k = t.id || t._localId
+            return (
+              <div key={k} className="grid gap-2 sm:grid-cols-3 items-end rounded-2xl border border-slate-100 p-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Table name</label>
+                  <input
+                    value={t.name}
+                    onChange={e => updateTableRow(k, 'name', e.target.value)}
+                    placeholder="e.g. Table 1"
+                    className={SMALL_INPUT_CLS}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Seats</label>
+                  <input
+                    type="number" min="1"
+                    value={t.seats}
+                    onChange={e => updateTableRow(k, 'seats', e.target.value)}
+                    placeholder="0"
+                    className={SMALL_INPUT_CLS}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Notes <span className="text-slate-400 font-normal">(optional)</span></label>
+                    <input
+                      value={t.notes}
+                      onChange={e => updateTableRow(k, 'notes', e.target.value)}
+                      placeholder="e.g. near stage"
+                      className={SMALL_INPUT_CLS}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeTableRow(k)}
+                    className="mb-0.5 self-end rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         {/* Logistics */}
@@ -454,10 +741,28 @@ export default function EventEditor() {
               <input
                 {...register('transportDetails')}
                 placeholder="e.g. Bus departs from Sandton City at 18:00"
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className={INPUT_CLS}
               />
             </div>
           )}
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Parking Information <span className="text-slate-400 font-normal">(optional)</span></label>
+            <textarea
+              {...register('parkingInfo')}
+              rows={2}
+              placeholder="Parking availability, cost, directions…"
+              className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Accessibility Information <span className="text-slate-400 font-normal">(optional)</span></label>
+            <textarea
+              {...register('accessibilityInfo')}
+              rows={2}
+              placeholder="Wheelchair access, hearing loops, parking bays…"
+              className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
         </div>
 
         {/* Agenda / Programme */}
@@ -536,21 +841,201 @@ export default function EventEditor() {
           ))}
         </div>
 
-        {/* RSVP options */}
+        {/* RSVP Options */}
         <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
           <h3 className="font-bold text-slate-800">RSVP Options</h3>
+          <ToggleRow
+            label="RSVP required"
+            description="Guests must confirm attendance before viewing event details"
+            checked={rsvpRequired}
+            onChange={setRsvpRequired}
+          />
           <ToggleRow
             label="Allow plus-one"
             description="Guests can bring an extra person"
             checked={allowPlusOne}
             onChange={setAllowPlusOne}
           />
+          {allowPlusOne && (
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Max plus-ones per guest <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="number"
+                min="1"
+                {...register('maxPlusOnes')}
+                placeholder="e.g. 2 (leave blank for unlimited)"
+                className={INPUT_CLS}
+              />
+            </div>
+          )}
           <ToggleRow
             label="Collect dietary requirements"
             description="Ask guests about dietary needs"
             checked={collectsDietary}
             onChange={setCollectsDietary}
           />
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">RSVP Deadline <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              type="date"
+              {...register('rsvpDeadline')}
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Message to guests <span className="text-slate-400 font-normal">(optional)</span></label>
+            <textarea
+              {...register('guestMessage')}
+              rows={2}
+              placeholder="A personal note shown highlighted on the invite page…"
+              className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+
+        {/* Custom Questions */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-slate-800">Custom Questions</h3>
+            <button
+              type="button"
+              onClick={addQuestion}
+              className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/20"
+            >
+              <Plus size={13} /> Add question
+            </button>
+          </div>
+          {customQuestions.length === 0 && (
+            <p className="text-sm text-slate-400">No custom questions. Add questions to collect additional info from guests.</p>
+          )}
+          {customQuestions.map((q, idx) => (
+            <div key={q.id} className="rounded-2xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Question {idx + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => removeQuestion(q.id)}
+                  className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Question label</label>
+                  <input
+                    value={q.label}
+                    onChange={e => updateQuestion(q.id, 'label', e.target.value)}
+                    placeholder="e.g. Which session will you attend?"
+                    className={SMALL_INPUT_CLS}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Answer type</label>
+                  <select
+                    value={q.type}
+                    onChange={e => updateQuestion(q.id, 'type', e.target.value)}
+                    className={SMALL_INPUT_CLS}
+                  >
+                    <option value="text">Short text</option>
+                    <option value="select">Dropdown</option>
+                    <option value="checkbox">Yes / No</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 pt-5">
+                  <input
+                    type="checkbox"
+                    id={`q-req-${q.id}`}
+                    checked={q.required}
+                    onChange={e => updateQuestion(q.id, 'required', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <label htmlFor={`q-req-${q.id}`} className="text-xs font-semibold text-slate-600 cursor-pointer">Required</label>
+                </div>
+              </div>
+              {q.type === 'select' && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Options <span className="text-slate-400 font-normal">(comma-separated)</span></label>
+                  <input
+                    value={q.options.join(', ')}
+                    onChange={e => updateQuestion(q.id, 'options', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                    placeholder="Option A, Option B, Option C"
+                    className={SMALL_INPUT_CLS}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Online & Extras */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800">Online &amp; Extras</h3>
+          <ToggleRow
+            label="Hybrid / virtual event"
+            description="Event has an online livestream component"
+            checked={isHybrid}
+            onChange={setIsHybrid}
+          />
+          {isHybrid && (
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Livestream URL</label>
+              <input
+                {...register('livestreamUrl')}
+                type="url"
+                placeholder="https://..."
+                className={INPUT_CLS}
+              />
+            </div>
+          )}
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Gift Registry URL <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              {...register('giftRegistryUrl')}
+              type="url"
+              placeholder="https://..."
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">Event Hashtag <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              {...register('hashtag')}
+              placeholder="#YourHashtag"
+              className={INPUT_CLS}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-slate-700">WhatsApp Contact Number <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input
+              {...register('whatsappContact')}
+              placeholder="+27 81 234 5678"
+              className={INPUT_CLS}
+            />
+          </div>
+        </div>
+
+        {/* Reminders */}
+        <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800">Reminders</h3>
+          <ToggleRow
+            label="Send automatic reminder"
+            description="Remind guests via email/SMS before the event"
+            checked={autoReminder}
+            onChange={setAutoReminder}
+          />
+          {autoReminder && (
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-700">Days before event</label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                {...register('reminderDaysBefore')}
+                className={INPUT_CLS}
+              />
+            </div>
+          )}
         </div>
 
         {/* Guest list */}
