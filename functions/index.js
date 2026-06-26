@@ -2849,6 +2849,150 @@ exports.changeSubscriptionPlan = onCall({
   }
 })
 
+// ── Benchmarks ────────────────────────────────────────────────────────────────
+// Zone B data engine: nightly anonymised cohort benchmarks across all active users.
+// Writes to analytics/benchmarks — a single aggregated doc, never individual values.
+// Cohorts below MIN_COHORT_SIZE are suppressed entirely to prevent reverse identification.
+
+const MIN_COHORT_SIZE = 20
+
+async function buildBenchmarks() {
+  const now   = new Date()
+  const year  = now.getFullYear()
+  const month = now.getMonth()
+  const period = `${year}-${String(month + 1).padStart(2, '0')}`
+
+  // Current-month window (UTC — consistent with how Cloud Functions run)
+  const monthStart = admin.firestore.Timestamp.fromDate(new Date(year, month,     1, 0, 0, 0, 0))
+  const monthEnd   = admin.firestore.Timestamp.fromDate(new Date(year, month + 1, 1, 0, 0, 0, 0))
+
+  const usersSnap   = await db.collection('users').get()
+  const activeUsers = usersSnap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(u => u.isActive === true)
+
+  // Gather per-user counts in parallel — counts only, no document bodies
+  const userMetrics = await Promise.all(
+    activeUsers.map(async u => {
+      const contactCol = CONTACT_COLLECTION[u.industry] ?? 'customers'
+      try {
+        const [campSnap, msgSnap, apptSnap, contactSnap] = await Promise.all([
+          // Campaigns sent this month — field name `sentAt` (set by processScheduledCampaigns)
+          db.collection(`users/${u.id}/campaigns`)
+            .where('sentAt', '>=', monthStart)
+            .where('sentAt', '<', monthEnd)
+            .count().get(),
+          // Messages logged this month — field name `sentAt` (set by all send paths)
+          db.collection(`users/${u.id}/messages`)
+            .where('sentAt', '>=', monthStart)
+            .where('sentAt', '<', monthEnd)
+            .count().get(),
+          // Appointments total
+          db.collection(`users/${u.id}/appointments`).count().get(),
+          // Contacts — industry-specific collection (reuses CONTACT_COLLECTION mapping)
+          db.collection(`users/${u.id}/${contactCol}`).count().get(),
+        ])
+        return {
+          industry:           u.industry,
+          plan:               u.plan,
+          campaignsThisMonth: campSnap.data().count,
+          messagesThisMonth:  msgSnap.data().count,
+          appointments:       apptSnap.data().count,
+          contacts:           contactSnap.data().count,
+        }
+      } catch (e) {
+        console.error(`[benchmarks] metrics error uid=${u.id}:`, e.message)
+        // Return zeros rather than dropping the user from cohort counts
+        return {
+          industry:           u.industry,
+          plan:               u.plan,
+          campaignsThisMonth: 0,
+          messagesThisMonth:  0,
+          appointments:       0,
+          contacts:           0,
+        }
+      }
+    })
+  )
+
+  function avg(arr) {
+    return arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length * 10) / 10 : 0
+  }
+  function median(arr) {
+    if (!arr.length) return 0
+    const s = [...arr].sort((a, b) => a - b)
+    const m = Math.floor(s.length / 2)
+    return s.length % 2 === 0 ? Math.round((s[m - 1] + s[m]) / 2 * 10) / 10 : s[m]
+  }
+
+  // THE ANONYMISATION GATE — cohorts below MIN_COHORT_SIZE produce no benchmark output
+  function cohortStats(metrics) {
+    const n = metrics.length
+    if (n < MIN_COHORT_SIZE) return { suppressed: true, reason: 'cohort_too_small', cohortSize: n }
+    const camps    = metrics.map(m => m.campaignsThisMonth)
+    const msgs     = metrics.map(m => m.messagesThisMonth)
+    const appts    = metrics.map(m => m.appointments)
+    const contacts = metrics.map(m => m.contacts)
+    return {
+      suppressed:               false,
+      cohortSize:               n,
+      avgCampaignsPerMonth:     avg(camps),
+      medianCampaigns:          median(camps),
+      avgMessages:              avg(msgs),
+      medianMessages:           median(msgs),
+      avgAppointments:          avg(appts),
+      avgContacts:              avg(contacts),
+      pctWithCampaignThisMonth: Math.round(camps.filter(c => c > 0).length / n * 100),
+    }
+  }
+
+  const byIndustry = {}
+  for (const ind of ['b2b', 'medical', 'property', 'retail']) {
+    byIndustry[ind] = cohortStats(userMetrics.filter(m => m.industry === ind))
+  }
+
+  const byPlan = {}
+  for (const plan of ['starter', 'business', 'enterprise']) {
+    byPlan[plan] = cohortStats(userMetrics.filter(m => m.plan === plan))
+  }
+
+  return {
+    computedAt:       admin.firestore.FieldValue.serverTimestamp(),
+    period,
+    totalActiveUsers: activeUsers.length,
+    byIndustry,
+    byPlan,
+  }
+}
+
+// Runs nightly at 00:00 UTC (02:00 SAST)
+exports.computeBenchmarks = onSchedule(
+  { schedule: '0 0 * * *', timeoutSeconds: 300 },
+  async () => {
+    console.log('[benchmarks] nightly compute starting')
+    try {
+      const result = await buildBenchmarks()
+      await db.doc('analytics/benchmarks').set(result)
+      console.log(`[benchmarks] written — period=${result.period}, activeUsers=${result.totalActiveUsers}`)
+    } catch (e) {
+      console.error('[benchmarks] error:', e.message)
+    }
+  }
+)
+
+// Super-admin callable — triggers an immediate recompute on demand
+exports.recomputeBenchmarks = onCall({ timeoutSeconds: 300 }, async (req) => {
+  requireSuperAdmin(req)
+  try {
+    const result = await buildBenchmarks()
+    await db.doc('analytics/benchmarks').set(result)
+    return { success: true, period: result.period }
+  } catch (e) {
+    console.error('[benchmarks] recompute error:', e.message)
+    return { success: false, error: e.message }
+  }
+})
+
 // ── Events module ─────────────────────────────────────────────────────────────
 const eventsModule = require('./events.js')
 Object.assign(exports, eventsModule)
