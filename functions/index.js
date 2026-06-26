@@ -3239,13 +3239,15 @@ exports.generateMonthlyReport = onCall({ timeoutSeconds: 120 }, async (req) => {
       : await renderOperatorPDF(reportData)
 
     const storagePath = `reports/${reportData.period}/${type}.pdf`
-    const file = storage.bucket().file(storagePath)
+    const token = crypto.randomUUID()
+    const file  = storage.bucket().file(storagePath)
     await file.save(pdfBuffer, { contentType: 'application/pdf', resumable: false })
+    // Set a Firebase Storage download token — avoids iam.serviceAccounts.signBlob requirement
+    await file.setMetadata({ metadata: { firebaseStorageDownloadTokens: token } })
 
-    const [signedUrl] = await file.getSignedUrl({
-      action:  'read',
-      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    })
+    const bucketName  = storage.bucket().name
+    const encodedPath = encodeURIComponent(storagePath)
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
 
     // Count opted-in users now so the send-confirmation modal can show the recipient count
     const recipientSnap = await db.collection('users')
@@ -3264,7 +3266,7 @@ exports.generateMonthlyReport = onCall({ timeoutSeconds: 120 }, async (req) => {
     console.log(`[report] ${type} generated for ${reportData.period}`)
     return {
       success:        true,
-      downloadUrl:    signedUrl,
+      downloadUrl,
       period:         reportData.period,
       recipientCount: recipientSnap.size,
     }
