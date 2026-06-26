@@ -1422,8 +1422,24 @@ function AdminCampaigns() {
 
 // ── Insights ──────────────────────────────────────────────────────────────────
 function Insights() {
-  const [engagement, setEngagement] = useState(null)
-  const [loading,    setLoading]    = useState(true)
+  const [engagement,   setEngagement]   = useState(null)
+  const [loading,      setLoading]      = useState(true)
+  const [recomputing,  setRecomputing]  = useState(false)
+  const [recomputeMsg, setRecomputeMsg] = useState(null)
+
+  async function handleRecompute() {
+    setRecomputing(true)
+    setRecomputeMsg(null)
+    try {
+      const fn  = httpsCallable(functions, 'recomputeBenchmarks')
+      const res = await fn()
+      setRecomputeMsg({ ok: true, text: `Benchmarks updated — period ${res.data.period}` })
+    } catch (e) {
+      setRecomputeMsg({ ok: false, text: e.message || 'Recompute failed' })
+    } finally {
+      setRecomputing(false)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -1566,9 +1582,26 @@ function Insights() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800">Platform Insights</h2>
-        <p className="mt-1 text-sm font-medium text-slate-400">Engagement intelligence across all users · operator only</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Platform Insights</h2>
+          <p className="mt-1 text-sm font-medium text-slate-400">Engagement intelligence across all users · operator only</p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <button
+            onClick={handleRecompute}
+            disabled={recomputing}
+            className="flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {recomputing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {recomputing ? 'Recomputing…' : 'Recompute Benchmarks'}
+          </button>
+          {recomputeMsg && (
+            <p className={`text-xs font-medium ${recomputeMsg.ok ? 'text-emerald-600' : 'text-red-500'}`}>
+              {recomputeMsg.text}
+            </p>
+          )}
+        </div>
       </div>
 
       {loading ? (
