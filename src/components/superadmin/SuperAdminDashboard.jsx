@@ -27,6 +27,7 @@ import {
   DollarSign, Smartphone, AtSign, RefreshCw, ChevronRight,
   Shield, Clock, Star, Bell, Bot,
 } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PLAN_META = {
@@ -1419,6 +1420,231 @@ function AdminCampaigns() {
   )
 }
 
+// ── Insights ──────────────────────────────────────────────────────────────────
+function Insights() {
+  const [engagement, setEngagement] = useState(null)
+  const [loading,    setLoading]    = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const snap     = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')))
+        const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const active   = allUsers.filter(u => u.isActive)
+
+        const results = await Promise.all(
+          active.map(async u => {
+            try {
+              const [campSnap, msgSnap] = await Promise.all([
+                getCountFromServer(collection(db, 'users', u.id, 'campaigns')),
+                getCountFromServer(collection(db, 'users', u.id, 'messages')),
+              ])
+              return {
+                id:        u.id,
+                name:      u.name || u.businessName || u.email,
+                email:     u.email,
+                industry:  u.industry,
+                plan:      u.plan,
+                campaigns: campSnap.data().count,
+                messages:  msgSnap.data().count,
+                createdAt: u.createdAt,
+                status:    getStatus(u),
+              }
+            } catch {
+              return {
+                id:        u.id,
+                name:      u.name || u.businessName || u.email,
+                email:     u.email,
+                industry:  u.industry,
+                plan:      u.plan,
+                campaigns: 0,
+                messages:  0,
+                createdAt: u.createdAt,
+                status:    getStatus(u),
+              }
+            }
+          })
+        )
+        setEngagement(results)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  const totalCampaigns  = engagement ? engagement.reduce((s, u) => s + u.campaigns, 0) : 0
+  const totalMessages   = engagement ? engagement.reduce((s, u) => s + u.messages,  0) : 0
+  const activeCount     = engagement ? engagement.length : 0
+  const withCampaign    = engagement ? engagement.filter(u => u.campaigns >= 1).length : 0
+  const avgCampaigns    = activeCount > 0 ? (totalCampaigns / activeCount).toFixed(1) : '—'
+  const pctWithCampaign = activeCount > 0 ? Math.round((withCampaign / activeCount) * 100) : 0
+
+  const byIndustry = ['b2b', 'medical', 'property', 'retail'].map(ind => ({
+    name:      INDUSTRY_META[ind]?.label ?? ind,
+    campaigns: engagement ? engagement.filter(u => u.industry === ind).reduce((s, u) => s + u.campaigns, 0) : 0,
+  }))
+
+  const byPlan = Object.entries(PLAN_META).map(([key, meta]) => {
+    const pu  = engagement ? engagement.filter(u => u.plan === key) : []
+    const avg = pu.length > 0 ? parseFloat((pu.reduce((s, u) => s + u.campaigns, 0) / pu.length).toFixed(1)) : 0
+    return { key, label: meta.label, avg, color: meta.color }
+  })
+  const maxPlanAvg = Math.max(...byPlan.map(p => p.avg), 1)
+
+  const underEngaged = engagement
+    ? [...engagement].sort((a, b) => a.campaigns - b.campaigns).slice(0, 25)
+    : []
+
+  const SAGE = '#5B8E7D'
+
+  const KPI = ({ label, value, sub, Icon, bg, textColor }) => (
+    <div className="group rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm transition-all hover:shadow-xl hover:shadow-slate-200/40">
+      <div className="mb-5 flex items-start justify-between">
+        <span className={`flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm transition-transform duration-300 group-hover:scale-110 ${bg}`}>
+          <Icon size={22} />
+        </span>
+      </div>
+      <p className="mb-1 text-xs font-bold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className={`text-4xl font-black tracking-tight ${textColor ?? 'text-slate-900'}`}>{value}</p>
+      {sub && <p className="mt-1 text-xs font-medium text-slate-400">{sub}</p>}
+    </div>
+  )
+
+  const ueCols = [
+    {
+      key: 'name', label: 'Business / Name',
+      render: r => {
+        const meta = INDUSTRY_META[r.industry]
+        return (
+          <div className="flex items-center gap-3">
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${meta?.color ?? 'bg-slate-100 text-slate-400'}`}>
+              {meta ? <meta.Icon size={14} /> : <Users size={14} />}
+            </span>
+            <div>
+              <p className="font-semibold text-slate-800">{r.name}</p>
+              <p className="text-xs text-slate-400">{r.email}</p>
+            </div>
+          </div>
+        )
+      }
+    },
+    {
+      key: 'industry', label: 'Industry',
+      render: r => {
+        const meta = INDUSTRY_META[r.industry]
+        return meta
+          ? <span className={`rounded-lg px-2 py-0.5 text-xs font-bold ${meta.color}`}>{meta.label}</span>
+          : <span className="text-xs capitalize text-slate-400">{r.industry ?? '—'}</span>
+      }
+    },
+    {
+      key: 'plan', label: 'Plan',
+      render: r => {
+        const p = PLAN_META[r.plan]
+        return p
+          ? <span className={`rounded-lg px-2 py-0.5 text-xs font-bold ${p.color}`}>{p.label}</span>
+          : <span className="text-xs text-slate-400">{r.plan || '—'}</span>
+      }
+    },
+    {
+      key: 'status', label: 'Status',
+      render: r => (
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${STATUS_BADGE[r.status] ?? STATUS_BADGE.pending}`}>{r.status}</span>
+      )
+    },
+    {
+      key: 'campaigns', label: 'Campaigns',
+      render: r => <span className="text-sm font-bold text-slate-700">{r.campaigns}</span>
+    },
+    {
+      key: 'createdAt', label: 'Registered',
+      render: r => <span className="text-xs text-slate-400">{r.createdAt?.toDate?.()?.toLocaleDateString('en-ZA') ?? '—'}</span>
+    },
+  ]
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Platform Insights</h2>
+        <p className="mt-1 text-sm font-medium text-slate-400">Engagement intelligence across all users · operator only</p>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 size={20} className="animate-spin text-slate-300" />
+        </div>
+      ) : !engagement || engagement.length === 0 ? (
+        <p className="py-16 text-center text-sm text-slate-400">No data yet.</p>
+      ) : (
+        <>
+          {/* Engagement KPI row */}
+          <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
+            <KPI label="Total Campaigns"       value={totalCampaigns.toLocaleString('en-ZA')} Icon={Megaphone}     bg="bg-primary/10 text-primary"       textColor="text-primary"      sub="All-time across active users" />
+            <KPI label="Total Messages Sent"   value={totalMessages.toLocaleString('en-ZA')}  Icon={MessageSquare} bg="bg-blue-50 text-blue-600"          sub="SMS + email all-time"         />
+            <KPI label="Avg Campaigns / User"  value={avgCampaigns}                           Icon={TrendingUp}    bg="bg-emerald-50 text-emerald-600"    textColor="text-emerald-700"  sub="Active users only"             />
+            <KPI label="Have Sent ≥1 Campaign" value={`${pctWithCampaign}%`}                  Icon={Activity}      bg="bg-amber-50 text-amber-600"        textColor="text-amber-700"    sub={`${withCampaign} of ${activeCount} active users`} />
+          </div>
+
+          {/* Campaign by industry + plan breakdown */}
+          <div className="grid grid-cols-[1.6fr_1fr] gap-5">
+            <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+              <p className="mb-1 text-xs font-bold uppercase tracking-widest text-slate-400">Campaign Activity by Industry</p>
+              <p className="mb-5 text-xs text-slate-400">Total campaigns per industry (all active users)</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byIndustry} barSize={36}>
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12, boxShadow: 'none' }}
+                    cursor={{ fill: '#f8fafc' }}
+                  />
+                  <Bar dataKey="campaigns" radius={[6, 6, 0, 0]}>
+                    {byIndustry.map((_, i) => <Cell key={i} fill={SAGE} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+              <p className="mb-1 text-xs font-bold uppercase tracking-widest text-slate-400">Avg Campaigns by Plan</p>
+              <p className="mb-5 text-xs text-slate-400">Average campaigns per user per subscription tier</p>
+              <div className="space-y-5">
+                {byPlan.map(({ key, label, avg, color }) => {
+                  const pct = Math.round((avg / maxPlanAvg) * 100)
+                  return (
+                    <div key={key}>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${color}`}>{label}</span>
+                        <span className="text-sm font-bold text-slate-700">{avg}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Under-engaged users */}
+          <div>
+            <div className="mb-4">
+              <p className="text-base font-bold text-slate-800">Growth Opportunities</p>
+              <p className="mt-0.5 text-sm text-slate-400">Lowest-campaign active users · sorted ascending · capped at 25</p>
+            </div>
+            <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+              <DataTable columns={ueCols} data={underEngaged} emptyMessage="No active users found." />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── AI Agent ──────────────────────────────────────────────────────────────────
 const AGENT_DOC = doc(db, 'superadmin', 'aiAgent')
 const WELCOME   = "Hi! I'm Tlhiso Intelligence — your direct marketing and business growth advisor.\n\nI help you grow your users' businesses by identifying who to reach, what to say, and when to send it. I have live access to your platform data.\n\nTry asking:\n• \"Which users haven't sent a campaign this month?\"\n• \"Suggest a campaign for my medical users\"\n• \"Who is leaving growth on the table?\"\n• \"What's the best campaign to send this week?\""
@@ -1590,6 +1816,7 @@ export default function SuperAdminDashboard() {
         <Route path="support"          element={<AdminSupport />}        />
         <Route path="settings"         element={<AdminSettings />}       />
         <Route path="campaigns"        element={<AdminCampaigns />}      />
+        <Route path="insights"         element={<Insights />}            />
         <Route path="agent"            element={<AdminAIAgent />}        />
       </Routes>
     </DashboardLayout>
