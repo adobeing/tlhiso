@@ -196,6 +196,8 @@ All functions are **2nd Gen, Node 20, us-central1**.
 | `getProviderStats` | HTTPS Callable | Returns messaging provider stats for super admin |
 | `computeBenchmarks` | Cloud Scheduler (nightly 00:00 UTC) | Zone B data engine — builds anonymised cohort benchmarks across all active users; writes to `analytics/benchmarks`. Cohorts below `MIN_COHORT_SIZE = 20` are suppressed. No individual user data ever written. |
 | `recomputeBenchmarks` | HTTPS Callable (super admin only) | Manual trigger for `buildBenchmarks()` — same output as `computeBenchmarks`. Returns `{ success, period }`. |
+| `generateMonthlyReport` | HTTPS Callable (super admin only) | Generates newsletter or operator PDF from `analytics/benchmarks` only; uploads to `reports/{period}/{type}.pdf` in Storage; returns 7-day signed URL + opted-in recipient count. No email sent. |
+| `sendMonthlyNewsletter` | HTTPS Callable (super admin only) | Sends pre-generated newsletter PDF to all `marketingConsent === true` active users via SendGrid. Requires `confirm: true` in payload — aborts otherwise. Returns `{ sentCount, skippedOptOut }`. |
 
 Callable usage from React:
 ```js
@@ -363,6 +365,7 @@ Point these records at your domain registrar:
 | 2026-06-19 | **Events dashboard** — tier-based activation page, EventsRoute guard, `eventsActivated` field | `src/components/events/`, `src/routes/guards.jsx`, `functions/events.js` |
 | 2026-06-26 | **Super Admin Insights tab** — engagement KPIs, Recharts bar chart by industry, avg-campaigns-by-plan, Growth Opportunities DataTable | `src/components/superadmin/SuperAdminDashboard.jsx`, `src/components/shared/DashboardLayout.jsx` |
 | 2026-06-26 | **Zone B benchmark functions** — `computeBenchmarks` (nightly scheduler) + `recomputeBenchmarks` (callable); writes anonymised cohort stats to `analytics/benchmarks`; `MIN_COHORT_SIZE = 20` suppression gate | `functions/index.js` |
+| 2026-06-26 | **Monthly Report Generator** — `generateMonthlyReport` + `sendMonthlyNewsletter` callables; pdfkit newsletter + operator PDFs; Monthly Report card on Insights tab with confirm-gated send modal | `functions/index.js`, `functions/package.json`, `src/components/superadmin/SuperAdminDashboard.jsx` |
 
 ---
 

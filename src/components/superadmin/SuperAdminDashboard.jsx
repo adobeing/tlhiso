@@ -1441,6 +1441,48 @@ function Insights() {
     }
   }
 
+  const [reportLinks,   setReportLinks]   = useState({})
+  const [generating,    setGenerating]    = useState(null)
+  const [showSendModal, setShowSendModal] = useState(false)
+  const [sending,       setSending]       = useState(false)
+  const [sendResult,    setSendResult]    = useState(null)
+
+  async function handleGenerate(type) {
+    setGenerating(type)
+    setSendResult(null)
+    try {
+      const fn  = httpsCallable(functions, 'generateMonthlyReport')
+      const res = await fn({ type })
+      if (res.data.success) {
+        setReportLinks(prev => ({
+          ...prev,
+          [type]: { url: res.data.downloadUrl, period: res.data.period, recipientCount: res.data.recipientCount },
+        }))
+      } else {
+        setSendResult({ success: false, error: res.data.error || 'Generation failed' })
+      }
+    } catch (e) {
+      setSendResult({ success: false, error: e.message || 'Generation failed' })
+    } finally {
+      setGenerating(null)
+    }
+  }
+
+  async function handleSendNewsletter() {
+    setSending(true)
+    try {
+      const fn  = httpsCallable(functions, 'sendMonthlyNewsletter')
+      const res = await fn({ period: reportLinks.newsletter.period, confirm: true })
+      setSendResult(res.data)
+      setShowSendModal(false)
+    } catch (e) {
+      setSendResult({ success: false, error: e.message || 'Send failed' })
+      setShowSendModal(false)
+    } finally {
+      setSending(false)
+    }
+  }
+
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -1674,6 +1716,104 @@ function Insights() {
           </div>
         </>
       )}
+
+      {/* Monthly Report — generates from anonymised benchmark data only */}
+      <div className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+        <div className="mb-5">
+          <p className="text-base font-bold text-slate-800">Monthly Report</p>
+          <p className="mt-0.5 text-sm text-slate-400">Generate branded PDFs from anonymised benchmark data · no individual user data included</p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => handleGenerate('newsletter')}
+            disabled={!!generating}
+            className="flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {generating === 'newsletter' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+            Generate Newsletter PDF
+          </button>
+          <button
+            onClick={() => handleGenerate('operator')}
+            disabled={!!generating}
+            className="flex items-center gap-2 rounded-2xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {generating === 'operator' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+            Generate Operator PDF
+          </button>
+          <button
+            onClick={() => setShowSendModal(true)}
+            disabled={!reportLinks.newsletter || !!generating}
+            className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+          >
+            <Send size={14} />
+            Send Newsletter to Users
+          </button>
+        </div>
+
+        {(reportLinks.newsletter || reportLinks.operator) && (
+          <div className="mt-4 flex flex-wrap gap-4">
+            {reportLinks.newsletter && (
+              <a href={reportLinks.newsletter.url} target="_blank" rel="noreferrer"
+                 className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+                <FileText size={13} /> View Newsletter PDF ({reportLinks.newsletter.period})
+              </a>
+            )}
+            {reportLinks.operator && (
+              <a href={reportLinks.operator.url} target="_blank" rel="noreferrer"
+                 className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:underline">
+                <FileText size={13} /> View Operator PDF ({reportLinks.operator.period})
+              </a>
+            )}
+          </div>
+        )}
+
+        {sendResult && (
+          <p className={`mt-3 text-sm font-medium ${sendResult.success ? 'text-emerald-600' : 'text-red-500'}`}>
+            {sendResult.success
+              ? `Sent to ${sendResult.sentCount} users · ${sendResult.skippedOptOut} skipped (opted out)`
+              : `Error: ${sendResult.error}`}
+          </p>
+        )}
+      </div>
+
+      <Modal
+        open={showSendModal}
+        onClose={() => !sending && setShowSendModal(false)}
+        title="Send Newsletter to Users"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-800">This will email all opted-in users</p>
+            <p className="mt-1 text-sm text-amber-700">
+              {reportLinks.newsletter?.recipientCount != null
+                ? `${reportLinks.newsletter.recipientCount} opted-in active user${reportLinks.newsletter.recipientCount !== 1 ? 's' : ''} will receive the newsletter PDF.`
+                : 'All opted-in active users will receive the newsletter PDF.'}
+            </p>
+          </div>
+          <p className="text-sm text-slate-500">
+            Period: <strong>{reportLinks.newsletter?.period}</strong>
+            <br />The newsletter PDF contains only anonymised, aggregated benchmark data — no individual user information is shared.
+          </p>
+          <div className="flex gap-3 pt-1">
+            <button
+              onClick={handleSendNewsletter}
+              disabled={sending}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              {sending ? 'Sending…' : 'Confirm — Send Now'}
+            </button>
+            <button
+              onClick={() => setShowSendModal(false)}
+              disabled={sending}
+              className="flex-1 rounded-2xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

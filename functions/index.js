@@ -2993,6 +2993,377 @@ exports.recomputeBenchmarks = onCall({ timeoutSeconds: 300 }, async (req) => {
   }
 })
 
+// ── Monthly Report Generator ──────────────────────────────────────────────────
+// Reads analytics/benchmarks (ONLY) to produce two PDF outputs:
+//   newsletter.pdf — public-facing, emailed to opted-in users
+//   operator.pdf   — super-admin only, richer cohort detail
+//
+// STRUCTURAL SAFETY: buildReportData, renderNewsletterPDF, and renderOperatorPDF
+// never query users or any user subcollection. They read only analytics/benchmarks.
+
+const PDFDocument = require('pdfkit')
+
+const REPORT_MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+]
+const REPORT_INDUSTRY_LABELS = {
+  b2b:      'B2B & Professional Services',
+  medical:  'Medical & Health',
+  property: 'Property Management',
+  retail:   'Consumer Business',
+}
+const REPORT_PLAN_LABELS = {
+  starter:    'Starter',
+  business:   'Professional',
+  enterprise: 'Business',
+}
+
+// Reads ONLY analytics/benchmarks. No user collection queries — ever.
+async function buildReportData() {
+  const snap = await db.doc('analytics/benchmarks').get()
+  if (!snap.exists) {
+    throw new Error('Benchmark data not yet available. Run "Recompute Benchmarks" first.')
+  }
+  const data = snap.data()
+  const [yr, mo] = data.period.split('-').map(Number)
+  return {
+    period:           data.period,
+    periodLabel:      `${REPORT_MONTH_NAMES[mo - 1]} ${yr}`,
+    totalActiveUsers: data.totalActiveUsers,
+    byIndustry:       data.byIndustry ?? {},
+    byPlan:           data.byPlan ?? {},
+  }
+}
+
+// Builds the public-facing newsletter PDF from anonymised benchmark data only.
+function renderNewsletterPDF(reportData) {
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ size: 'A4', margin: 50 })
+    const chunks = []
+    doc.on('data',  c => chunks.push(c))
+    doc.on('end',   () => resolve(Buffer.concat(chunks)))
+    doc.on('error', reject)
+
+    const SAGE  = '#5B8E7D'
+    const DARK  = '#1e293b'
+    const MUTED = '#64748b'
+    const W     = 495
+
+    // Header band
+    doc.rect(0, 0, 595, 110).fill(SAGE)
+    doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold')
+       .text('Tlhiso Market Pulse', 50, 28)
+    doc.fontSize(14).font('Helvetica').text(reportData.periodLabel, 50, 58)
+    doc.fontSize(9).fillColor('#d1fae5')
+       .text("South Africa's direct-marketing intelligence platform", 50, 80)
+
+    doc.moveDown(3.5)
+    doc.fillColor(DARK).fontSize(10).font('Helvetica-Bold').text('About this report')
+    doc.moveDown(0.4)
+    doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+       .text(
+         'The Tlhiso Market Pulse gives South African businesses an independent, anonymised view of how ' +
+         'similar businesses are using direct marketing. All figures are platform averages — no individual ' +
+         'business data is ever included.',
+         { lineGap: 3, width: W }
+       )
+
+    doc.moveDown(1.2)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Platform snapshot')
+    doc.moveDown(0.4)
+    doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+       .text(`Active businesses on Tlhiso this month: ${reportData.totalActiveUsers}`, { lineGap: 2 })
+
+    doc.moveDown(1.2)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Campaign benchmarks by industry')
+    doc.moveDown(0.5)
+
+    for (const [ind, stats] of Object.entries(reportData.byIndustry)) {
+      const label = REPORT_INDUSTRY_LABELS[ind] ?? ind
+      if (stats.suppressed) {
+        doc.fillColor(MUTED).fontSize(9).font('Helvetica-Oblique')
+           .text(`${label}: Building this benchmark — more data coming soon.`, { lineGap: 2 })
+        doc.moveDown(0.3)
+        continue
+      }
+      doc.moveDown(0.5)
+      doc.fillColor(SAGE).fontSize(10).font('Helvetica-Bold').text(label)
+      doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+      doc.text(
+        `Businesses on Tlhiso in this sector sent an average of ${stats.avgCampaignsPerMonth} campaigns last month.`,
+        { lineGap: 2 }
+      )
+      doc.text(
+        `Average messages sent: ${stats.avgMessages} · ${stats.pctWithCampaignThisMonth}% sent at least one campaign.`,
+        { lineGap: 2 }
+      )
+      doc.text(`Median campaigns: ${stats.medianCampaigns}`, { lineGap: 2 })
+      doc.moveDown(0.3)
+    }
+
+    doc.moveDown(0.8)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Activity by subscription tier')
+    doc.moveDown(0.4)
+    for (const [plan, stats] of Object.entries(reportData.byPlan)) {
+      const label = REPORT_PLAN_LABELS[plan] ?? plan
+      if (stats.suppressed) {
+        doc.fillColor(MUTED).fontSize(9).font('Helvetica-Oblique')
+           .text(`${label} tier: Building this benchmark — more data coming soon.`, { lineGap: 2 })
+        doc.moveDown(0.2)
+        continue
+      }
+      doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+         .text(`${label}: avg ${stats.avgCampaignsPerMonth} campaigns/month · avg ${stats.avgMessages} messages`, { lineGap: 2 })
+      doc.moveDown(0.2)
+    }
+
+    // Footer
+    doc.moveDown(2)
+    const lineY = doc.y
+    doc.moveTo(50, lineY).lineTo(545, lineY).strokeColor(MUTED).lineWidth(0.5).stroke()
+    doc.moveDown(0.5)
+    doc.fillColor(MUTED).fontSize(8).font('Helvetica')
+       .text(
+         'All figures are anonymised, aggregated platform averages — no individual business data is shown.  ·  hello@tlhiso.com  ·  tlhiso.com',
+         { align: 'center', lineGap: 2, width: W }
+       )
+    doc.fontSize(7).text(`Tlhiso (Pty) Ltd  ·  POPIA compliant  ·  ${reportData.periodLabel}`, { align: 'center', width: W })
+
+    doc.end()
+  })
+}
+
+// Builds the super-admin-only operator PDF. Includes richer cohort detail.
+function renderOperatorPDF(reportData) {
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ size: 'A4', margin: 50 })
+    const chunks = []
+    doc.on('data',  c => chunks.push(c))
+    doc.on('end',   () => resolve(Buffer.concat(chunks)))
+    doc.on('error', reject)
+
+    const SAGE  = '#5B8E7D'
+    const DARK  = '#1e293b'
+    const MUTED = '#64748b'
+    const W     = 495
+
+    // Header
+    doc.rect(0, 0, 595, 110).fill(DARK)
+    doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold')
+       .text('Tlhiso Operator Report', 50, 28)
+    doc.fontSize(14).font('Helvetica').text(reportData.periodLabel, 50, 58)
+    doc.fontSize(9).fillColor('#94a3b8')
+       .text('CONFIDENTIAL — Super Admin only · not for distribution', 50, 80)
+
+    doc.moveDown(3.5)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Platform overview')
+    doc.moveDown(0.4)
+    doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+       .text(`Total active users: ${reportData.totalActiveUsers}`, { lineGap: 2 })
+       .text(`Period: ${reportData.periodLabel}`, { lineGap: 2 })
+
+    doc.moveDown(1.2)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Industry cohort benchmarks')
+    doc.moveDown(0.4)
+
+    for (const [ind, stats] of Object.entries(reportData.byIndustry)) {
+      const label = REPORT_INDUSTRY_LABELS[ind] ?? ind
+      if (stats.suppressed) {
+        doc.fillColor(MUTED).fontSize(9).font('Helvetica-Oblique')
+           .text(`${label}: Suppressed (cohort size ${stats.cohortSize ?? 0} — below ${MIN_COHORT_SIZE} threshold)`, { lineGap: 2 })
+        doc.moveDown(0.2)
+        continue
+      }
+      doc.moveDown(0.5)
+      doc.fillColor(SAGE).fontSize(10).font('Helvetica-Bold').text(label)
+      doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+      doc.text(`Cohort size: ${stats.cohortSize} active users`, { lineGap: 2 })
+      doc.text(`Avg campaigns/month: ${stats.avgCampaignsPerMonth}  ·  median: ${stats.medianCampaigns}`, { lineGap: 2 })
+      doc.text(`Avg messages: ${stats.avgMessages}  ·  median: ${stats.medianMessages}`, { lineGap: 2 })
+      doc.text(`% with campaign this month: ${stats.pctWithCampaignThisMonth}%`, { lineGap: 2 })
+      doc.text(`Avg appointments: ${stats.avgAppointments}  ·  avg contacts: ${stats.avgContacts}`, { lineGap: 2 })
+      doc.moveDown(0.3)
+    }
+
+    doc.moveDown(0.8)
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Plan tier benchmarks')
+    doc.moveDown(0.4)
+    for (const [plan, stats] of Object.entries(reportData.byPlan)) {
+      const label = REPORT_PLAN_LABELS[plan] ?? plan
+      if (stats.suppressed) {
+        doc.fillColor(MUTED).fontSize(9).font('Helvetica-Oblique')
+           .text(`${label}: Suppressed (cohort size ${stats.cohortSize ?? 0})`, { lineGap: 2 })
+        doc.moveDown(0.2)
+        continue
+      }
+      doc.fillColor(MUTED).fontSize(9).font('Helvetica')
+         .text(
+           `${label}: ${stats.cohortSize} users  ·  avg ${stats.avgCampaignsPerMonth} campaigns/month  ·  avg ${stats.avgMessages} messages`,
+           { lineGap: 2 }
+         )
+      doc.moveDown(0.2)
+    }
+
+    // TODO: operator Zone A detail — per-user engagement breakdown (not yet implemented)
+
+    // Footer
+    doc.moveDown(2)
+    const lineY = doc.y
+    doc.moveTo(50, lineY).lineTo(545, lineY).strokeColor(MUTED).lineWidth(0.5).stroke()
+    doc.moveDown(0.5)
+    doc.fillColor(MUTED).fontSize(8).font('Helvetica')
+       .text(
+         'CONFIDENTIAL — Tlhiso Operator Report  ·  Internal use only  ·  All cohort data anonymised per POPIA',
+         { align: 'center', lineGap: 2, width: W }
+       )
+    doc.fontSize(7).text(`Tlhiso (Pty) Ltd  ·  ${reportData.periodLabel}`, { align: 'center', width: W })
+
+    doc.end()
+  })
+}
+
+// Generates the monthly report PDF, uploads to Storage, returns a 7-day signed URL.
+// Does NOT email anyone. No secrets required.
+exports.generateMonthlyReport = onCall({ timeoutSeconds: 120 }, async (req) => {
+  requireSuperAdmin(req)
+  const { type } = req.data
+  if (type !== 'newsletter' && type !== 'operator') {
+    throw new HttpsError('invalid-argument', 'type must be "newsletter" or "operator"')
+  }
+
+  try {
+    const reportData = await buildReportData()
+    const pdfBuffer  = type === 'newsletter'
+      ? await renderNewsletterPDF(reportData)
+      : await renderOperatorPDF(reportData)
+
+    const storagePath = `reports/${reportData.period}/${type}.pdf`
+    const file = storage.bucket().file(storagePath)
+    await file.save(pdfBuffer, { contentType: 'application/pdf', resumable: false })
+
+    const [signedUrl] = await file.getSignedUrl({
+      action:  'read',
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    })
+
+    // Count opted-in users now so the send-confirmation modal can show the recipient count
+    const recipientSnap = await db.collection('users')
+      .where('marketingConsent', '==', true)
+      .where('isActive', '==', true)
+      .get()
+
+    await db.collection('superadmin').doc('data').collection('reports').add({
+      type,
+      period:      reportData.period,
+      storagePath,
+      generatedBy: req.auth.token.email,
+      generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+
+    console.log(`[report] ${type} generated for ${reportData.period}`)
+    return {
+      success:        true,
+      downloadUrl:    signedUrl,
+      period:         reportData.period,
+      recipientCount: recipientSnap.size,
+    }
+  } catch (e) {
+    console.error('[report] generateMonthlyReport error:', e.message)
+    return { success: false, error: e.message }
+  }
+})
+
+// Sends the pre-generated newsletter PDF to all opted-in active users.
+// Requires confirm === true — returns error without sending if absent.
+// Reads the stored PDF from Storage — does NOT regenerate from user data.
+exports.sendMonthlyNewsletter = onCall({ timeoutSeconds: 300, secrets: ['SENDGRID_API_KEY'] }, async (req) => {
+  requireSuperAdmin(req)
+  const { period, confirm } = req.data
+
+  if (!confirm) return { success: false, error: 'confirmation_required' }
+  if (!period)  throw new HttpsError('invalid-argument', 'period is required (YYYY-MM)')
+
+  const cfg = getConfig()
+  sgMail.setApiKey(cfg.sendgridKey)
+
+  try {
+    // Load pre-generated PDF — does not touch user documents or subcollections
+    const storagePath = `reports/${period}/newsletter.pdf`
+    const file = storage.bucket().file(storagePath)
+    const [exists] = await file.exists()
+    if (!exists) {
+      return {
+        success: false,
+        error:   `Newsletter PDF for ${period} has not been generated yet. Generate it first from the Insights tab.`,
+      }
+    }
+    const [pdfBuffer] = await file.download()
+    const pdfBase64   = pdfBuffer.toString('base64')
+
+    // Fetch opted-in active users — single user-collection query for email addresses only
+    const usersSnap    = await db.collection('users').where('isActive', '==', true).get()
+    const allActive    = usersSnap.docs.map(d => d.data())
+    const optedIn      = allActive.filter(u => u.marketingConsent === true && !!u.email)
+    const skippedOptOut = allActive.length - optedIn.length
+
+    if (optedIn.length === 0) {
+      return { success: true, sentCount: 0, skippedOptOut, message: 'No opted-in users to send to.' }
+    }
+
+    const [yr, mo]  = period.split('-').map(Number)
+    const monthName = REPORT_MONTH_NAMES[mo - 1]
+    const subject   = `Tlhiso Market Pulse — ${monthName} ${yr}`
+    const htmlBody  = `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#5B8E7D;padding:32px;border-radius:12px 12px 0 0">
+          <h1 style="color:#ffffff;margin:0;font-size:22px">Tlhiso Market Pulse</h1>
+          <p style="color:#d1fae5;margin:8px 0 0;font-size:14px">${monthName} ${yr}</p>
+        </div>
+        <div style="padding:24px;background:#f8fafc;border-radius:0 0 12px 12px">
+          <p style="color:#475569">Hi there,</p>
+          <p style="color:#475569">Your monthly Tlhiso Market Pulse report is attached. It contains anonymised benchmark data showing how businesses like yours are performing across South Africa.</p>
+          <p style="color:#475569">Open the attached PDF to see campaign benchmarks by industry and subscription tier — all anonymised, all aggregated. No individual business data is ever shared.</p>
+          <p style="color:#94a3b8;font-size:12px;margin-top:24px">All figures are anonymised, aggregated platform averages — no individual business data is shown.<br>To unsubscribe from marketing emails, reply with "unsubscribe".</p>
+        </div>
+      </div>
+    `
+
+    const BATCH = 900
+    let sentCount = 0
+    for (let i = 0; i < optedIn.length; i += BATCH) {
+      const batch = optedIn.slice(i, i + BATCH)
+      await sgMail.send({
+        personalizations: batch.map(u => ({ to: [{ email: u.email, name: u.name || '' }] })),
+        from:        { email: cfg.sendgridFrom, name: cfg.sendgridFromName },
+        subject,
+        html:        htmlBody,
+        attachments: [{
+          content:     pdfBase64,
+          filename:    `Tlhiso-Market-Pulse-${period}.pdf`,
+          type:        'application/pdf',
+          disposition: 'attachment',
+        }],
+      })
+      sentCount += batch.length
+    }
+
+    await db.collection('superadmin').doc('data').collection('newsletterSends').add({
+      period,
+      sentCount,
+      skippedOptOut,
+      sentBy:  req.auth.token.email,
+      sentAt:  admin.firestore.FieldValue.serverTimestamp(),
+    })
+
+    console.log(`[newsletter] sent period=${period} sentCount=${sentCount} skipped=${skippedOptOut}`)
+    return { success: true, sentCount, skippedOptOut }
+  } catch (e) {
+    console.error('[newsletter] sendMonthlyNewsletter error:', e.message)
+    return { success: false, error: e.message }
+  }
+})
+
 // ── Events module ─────────────────────────────────────────────────────────────
 const eventsModule = require('./events.js')
 Object.assign(exports, eventsModule)
