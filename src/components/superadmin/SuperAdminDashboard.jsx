@@ -22,7 +22,7 @@ import {
   CheckCircle, XCircle, Eye, Trash2, Send, PauseCircle,
   BadgeCheck, BadgeX, Ban, Loader2, CreditCard, Phone, Mail,
   Users, Building2, HeartPulse, MapPin, ShoppingBag,
-  ArrowLeft, TrendingUp, MessageSquare, BarChart2,
+  ArrowLeft, TrendingUp, MessageSquare, BarChart2, Megaphone,
   Calendar, FileText, UserCheck, UserX, Activity,
   DollarSign, Smartphone, AtSign, RefreshCw, ChevronRight,
   Shield, Clock, Star, Bell, Bot,
