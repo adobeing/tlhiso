@@ -968,13 +968,16 @@ function Patients() {
     { key: 'idNumber', label: 'ID Number' },
     { key: 'phone', label: 'Phone' },
     { key: 'medicalAid', label: 'Medical Aid' },
-    { key: 'paymentType', label: 'Payment Type', render: r => r.paymentType ? (
-      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-        r.paymentType === 'Medical Aid' ? 'bg-primary/10 text-primary'
-        : r.paymentType === 'Cash' ? 'bg-amber-50 text-amber-700'
-        : 'bg-slate-100 text-slate-600'
-      }`}>{r.paymentType}</span>
-    ) : <span className="text-slate-400 text-xs">—</span> },
+    { key: 'paymentType', label: 'Payment Type', render: r => {
+      const pt = r.paymentType || (r.medicalAid ? 'Medical Aid' : 'Cash')
+      return (
+        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+          pt === 'Medical Aid' ? 'bg-primary/10 text-primary'
+          : pt === 'Cash' ? 'bg-amber-50 text-amber-700'
+          : 'bg-slate-100 text-slate-600'
+        }`}>{pt}</span>
+      )
+    }},
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1">
         <button onClick={e => { e.stopPropagation(); setViewing(r) }}
