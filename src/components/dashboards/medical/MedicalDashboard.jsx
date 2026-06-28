@@ -968,6 +968,13 @@ function Patients() {
     { key: 'idNumber', label: 'ID Number' },
     { key: 'phone', label: 'Phone' },
     { key: 'medicalAid', label: 'Medical Aid' },
+    { key: 'paymentType', label: 'Payment Type', render: r => r.paymentType ? (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        r.paymentType === 'Medical Aid' ? 'bg-primary/10 text-primary'
+        : r.paymentType === 'Cash' ? 'bg-amber-50 text-amber-700'
+        : 'bg-slate-100 text-slate-600'
+      }`}>{r.paymentType}</span>
+    ) : <span className="text-slate-400 text-xs">—</span> },
     { key: 'actions', label: '', sortable: false, render: r => (
       <div className="flex items-center gap-1">
         <button onClick={e => { e.stopPropagation(); setViewing(r) }}
@@ -2298,7 +2305,7 @@ function Practitioners() {
 const APPT_BLANK = {
   patientId: '', practitioner: '', date: new Date().toISOString().slice(0, 10),
   time: '', duration: '30', reason: '', appointmentType: 'Consultation', room: '',
-  status: 'Scheduled', notes: '', reminderSent: false,
+  status: 'Scheduled', notes: '', reminderSent: false, paymentType: '',
 }
 const APPT_TYPES  = ['Consultation','Follow-up','Procedure','Vaccination','Screening','Telehealth','Emergency']
 const APPT_STATUS = ['Scheduled','Confirmed','Arrived','Completed','Cancelled','No-show']
@@ -2534,7 +2541,7 @@ function Appointments() {
       date: appt.date || '', time: appt.time || '', duration: appt.duration || '30',
       reason: appt.reason || '', appointmentType: appt.appointmentType || 'Consultation',
       room: appt.room || '', status: appt.status || 'Scheduled', notes: appt.notes || '',
-      reminderSent: appt.reminderSent || false,
+      reminderSent: appt.reminderSent || false, paymentType: appt.paymentType || '',
     })
     setDetailAppt(null)
     setOpen(true)
@@ -2629,6 +2636,9 @@ function Appointments() {
         apptId = docRef.id
       }
       if (sendSms && patient) await sendSmsConfirmation(patient, payload, !!editing, apptId)
+      if (form.paymentType && patient?.id) {
+        await updateDoc(doc(db, 'users', uid, 'patients', patient.id), { paymentType: form.paymentType })
+      }
       setOpen(false); setForm(APPT_BLANK); setEditing(null); setSendSms(false)
     } finally { setSaving(false) }
   }
@@ -2691,6 +2701,13 @@ function Appointments() {
     { key: 'patient', label: 'Patient' },
     { key: 'practitioner', label: 'Practitioner' },
     { key: 'appointmentType', label: 'Type' },
+    { key: 'paymentType', label: 'Payment', render: r => r.paymentType ? (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        r.paymentType === 'Medical Aid' ? 'bg-primary/10 text-primary'
+        : r.paymentType === 'Cash' ? 'bg-amber-50 text-amber-700'
+        : 'bg-slate-100 text-slate-600'
+      }`}>{r.paymentType}</span>
+    ) : <span className="text-slate-400 text-xs">—</span> },
     { key: 'status', label: 'Status', render: r => (
       <div className="space-y-1">
         <select value={r.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); setApptStatus(r, e.target.value) }}
@@ -2924,6 +2941,24 @@ function Appointments() {
             {APPT_STATUS.map(s => <option key={s}>{s}</option>)}
           </Field>
           <div className="col-span-2"><Field label="Reason for Visit" value={form.reason} onChange={set('reason')} /></div>
+          <div className="col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Payment Type *</span>
+            <div className="flex gap-2">
+              {['Medical Aid', 'Cash', 'Other'].map(pt => (
+                <button key={pt} type="button"
+                  onClick={() => setForm(f => ({ ...f, paymentType: f.paymentType === pt ? '' : pt }))}
+                  className={`flex-1 rounded-xl border py-2 text-sm font-semibold transition ${
+                    form.paymentType === pt
+                      ? pt === 'Medical Aid' ? 'border-primary bg-primary text-white'
+                        : pt === 'Cash' ? 'border-amber-500 bg-amber-500 text-white'
+                        : 'border-slate-500 bg-slate-500 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                  }`}>
+                  {pt}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="col-span-2"><Field label="Notes" textarea value={form.notes} onChange={set('notes')} /></div>
         </div>
 
