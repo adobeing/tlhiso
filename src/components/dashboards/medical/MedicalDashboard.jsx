@@ -189,12 +189,14 @@ function ReferralPDF({ r, practice }) {
     <Document>
       <Page size="A4" style={pdfStyles.page}>
         <PdfHeader practice={practice} title="Referral Letter" />
+        {practice.address ? <Text style={[pdfStyles.practiceLine, { marginBottom: 8 }]}>{practice.address}</Text> : null}
         <PdfMeta items={[
           { label: 'Date', value: r.date },
           { label: 'Urgency', value: r.urgency },
           { label: 'Patient', value: r.patient },
           { label: 'ID Number', value: r.patientIdNumber },
           { label: 'Referring Practitioner', value: r.referringPractitioner },
+          { label: 'Practice No.', value: practice.practiceNumber },
           { label: 'Status', value: r.status },
         ]} />
         <PdfSection title="Referred To"
@@ -296,7 +298,7 @@ function SickNotePDF({ sn, practice }) {
         {sn.notes ? <PdfSection title="Additional Notes" body={sn.notes} /> : null}
         <PdfSignature practitioner={sn.practitioner} />
         <Text style={pdfStyles.footer} fixed>
-          {practice.name}  ·  Confidential medical document (POPIA).  ·  Generated via Tlhiso.
+          {practice.name}  ·  Confidential medical document (POPIA).
         </Text>
       </Page>
     </Document>
@@ -3474,9 +3476,11 @@ function Referrals() {
   const setE = k => e => setEditForm(f => ({ ...f, [k]: e.target.value }))
 
   const practice = {
-    name: profile?.businessName || profile?.name || 'Tlhiso',
-    logoUrl: profile?.businessLogoUrl || '',
-    line: [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
+    name:           profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl:        profile?.businessLogoUrl || '',
+    line:           [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
+    address:        profile?.address || '',
+    practiceNumber: profile?.practiceNumber || '',
   }
 
   function selectPatient(e) {

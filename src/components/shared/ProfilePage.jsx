@@ -18,6 +18,7 @@ const profileSchema = z.object({
   businessName: z.string().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
+  practiceNumber: z.string().optional(),
   vatNumber: z.string().optional(),
   googleReviewLink: z.string().optional(),
 })
@@ -91,6 +92,7 @@ export default function ProfilePage({ industry }) {
         businessName:     profile.businessName     ?? '',
         phone:            profile.phone            ?? '',
         address:          profile.address          ?? '',
+        practiceNumber:   profile.practiceNumber   ?? '',
         vatNumber:        profile.vatNumber        ?? '',
         googleReviewLink: profile.googleReviewLink ?? '',
       })
@@ -185,6 +187,7 @@ export default function ProfilePage({ industry }) {
             <Field label="VAT number" placeholder="e.g. 4123456789" {...regProfile('vatNumber')} />
           </div>
           <Field label="Address" {...regProfile('address')} />
+          <Field label="Practice / Registration number" placeholder="e.g. PR0012345" {...regProfile('practiceNumber')} />
           <Field
             label="Google Review link"
             placeholder="https://g.page/r/…/review"
