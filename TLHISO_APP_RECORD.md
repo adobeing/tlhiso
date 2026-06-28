@@ -286,7 +286,7 @@ admin.auth().setCustomUserClaims('<admin-uid>', { isAdmin: true })
 | Industry key | Dashboard path | Sidebar nav items |
 |---|---|---|
 | `b2b` | `/b2b/dashboard` | Dashboard, Clients, Invoices, Statements, Quotations, Projects, Service List, Appointments, Messages, Campaigns, Surveys, Marketing Opt-In, Profile, POPIA, Settings |
-| `medical` | `/medical/dashboard` | Dashboard, Patients, Consultations, Medical Reports, Referrals, Appointments, Messages, Campaigns, Surveys, Practitioners, Profile, POPIA, Settings |
+| `medical` | `/medical/dashboard` | Dashboard, Patients, Consultations, Medical Reports, Prescriptions, Sick Notes, Referrals, Appointments, Messages, Campaigns, Surveys, Practitioners, Profile, POPIA, Settings |
 | `property` | `/property/dashboard` | Dashboard, Properties, Tenants, Statements, Invoices, Maintenance, Owners, Appointments, Messages, Campaigns, Documents, Profile, POPIA, Settings |
 | `retail` | `/retail/dashboard` | Dashboard, Customers, Appointments, Messages, Campaigns, Weekly Deals, Surveys, Opt-In, Profile, POPIA, Settings |
 
@@ -366,6 +366,7 @@ Point these records at your domain registrar:
 | 2026-06-26 | **Super Admin Insights tab** — engagement KPIs, Recharts bar chart by industry, avg-campaigns-by-plan, Growth Opportunities DataTable | `src/components/superadmin/SuperAdminDashboard.jsx`, `src/components/shared/DashboardLayout.jsx` |
 | 2026-06-26 | **Zone B benchmark functions** — `computeBenchmarks` (nightly scheduler) + `recomputeBenchmarks` (callable); writes anonymised cohort stats to `analytics/benchmarks`; `MIN_COHORT_SIZE = 20` suppression gate | `functions/index.js` |
 | 2026-06-26 | **Monthly Report Generator** — `generateMonthlyReport` + `sendMonthlyNewsletter` callables; pdfkit newsletter + operator PDFs; Monthly Report card on Insights tab with confirm-gated send modal | `functions/index.js`, `functions/package.json`, `src/components/superadmin/SuperAdminDashboard.jsx` |
+| 2026-06-28 | **Prescriptions & Sick Notes** — new sections in `/medical` dashboard; `PrescriptionPDF` + `SickNotePDF` via `@react-pdf/renderer`; dynamic medicine item list; diagnosis confidentiality toggle on sick notes; stores to `users/{uid}/prescriptions` + `users/{uid}/sicknotes` | `src/components/dashboards/medical/MedicalDashboard.jsx`, `src/components/shared/DashboardLayout.jsx` |
 
 ---
 

@@ -17,7 +17,7 @@ import {
   Building2, HeartPulse, Map, ShoppingBag, Menu, X,
   Stethoscope, FileCheck, ArrowRightLeft, ClipboardSignature, HardHat,
   Star, Tag, List, CalendarClock, Zap, HelpCircle, Loader2, CheckCircle, Send, MessageSquare,
-  Wallet, Bot, PartyPopper, Plus, User,
+  Wallet, Bot, PartyPopper, Plus, User, Pill,
 } from 'lucide-react'
 
 const NAV_MAP = {
@@ -43,6 +43,8 @@ const NAV_MAP = {
     { label: 'Patients', icon: Users, to: '/medical/patients' },
     { label: 'Consultations', icon: Stethoscope, to: '/medical/consultations' },
     { label: 'Medical Reports', icon: FileCheck, to: '/medical/reports' },
+    { label: 'Prescriptions', icon: Pill, to: '/medical/prescriptions' },
+    { label: 'Sick Notes', icon: ClipboardList, to: '/medical/sicknotes' },
     { label: 'Referrals', icon: ArrowRightLeft, to: '/medical/referrals' },
     { label: 'Appointments', icon: Calendar, to: '/medical/appointments' },
     { label: 'Campaigns',    icon: Megaphone, to: '/medical/campaigns' },

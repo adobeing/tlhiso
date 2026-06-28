@@ -217,6 +217,92 @@ function ReferralPDF({ r, practice }) {
   )
 }
 
+// Prescription PDF
+function PrescriptionPDF({ rx, practice }) {
+  return (
+    <Document>
+      <Page size="A4" style={pdfStyles.page}>
+        <PdfHeader practice={practice} title="Prescription" />
+        {practice.address ? <Text style={[pdfStyles.practiceLine, { marginBottom: 8 }]}>{practice.address}</Text> : null}
+        <PdfMeta items={[
+          { label: 'Patient',      value: rx.patient },
+          { label: 'Date of Birth',value: rx.patientDob },
+          { label: 'ID Number',    value: rx.patientIdNumber },
+          { label: 'Medical Aid',  value: [rx.medicalAid, rx.planName].filter(Boolean).join(' — ') },
+          { label: 'Member No.',   value: rx.memberNumber },
+          { label: 'Date',         value: rx.date },
+          { label: 'Practitioner', value: rx.practitioner },
+          { label: 'Practice No.', value: practice.practiceNumber },
+        ]} />
+        {rx.items?.length > 0 && (
+          <View>
+            <Text style={pdfStyles.sectionTitle}>℞  Medicines Prescribed</Text>
+            {rx.items.map((item, i) => (
+              <View key={i} style={{ marginBottom: 10 }}>
+                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 10, marginBottom: 2 }}>
+                  {i + 1}.  {item.drug}
+                </Text>
+                <Text style={pdfStyles.rxLine}>
+                  {'   '}Dosage: {item.dosage || '—'}  ·  Frequency: {item.frequency || '—'}  ·  Duration: {item.duration || '—'}
+                </Text>
+                {item.quantity ? <Text style={pdfStyles.rxLine}>{'   '}Quantity: {item.quantity}</Text> : null}
+                {item.repeats  ? <Text style={pdfStyles.rxLine}>{'   '}Repeats: {item.repeats}</Text> : null}
+                {item.instructions ? <Text style={pdfStyles.rxLine}>{'   '}Instructions: {item.instructions}</Text> : null}
+              </View>
+            ))}
+          </View>
+        )}
+        {rx.notes ? <PdfSection title="Notes / Special Instructions" body={rx.notes} /> : null}
+        <PdfSignature practitioner={rx.practitioner} />
+        <Text style={pdfStyles.footer} fixed>
+          {practice.name}  ·  Confidential — valid for 30 days from date of issue (POPIA).  ·  Generated via Tlhiso.
+        </Text>
+      </Page>
+    </Document>
+  )
+}
+
+// Sick Note / Medical Certificate PDF
+function SickNotePDF({ sn, practice }) {
+  const periodStr = sn.fromDate && sn.toDate ? ` (${sn.fromDate} to ${sn.toDate})` : ''
+  return (
+    <Document>
+      <Page size="A4" style={pdfStyles.page}>
+        <PdfHeader practice={practice} title="Sick Note / Medical Certificate" />
+        {practice.address ? <Text style={[pdfStyles.practiceLine, { marginBottom: 8 }]}>{practice.address}</Text> : null}
+        <PdfMeta items={[
+          { label: 'Patient',             value: sn.patient },
+          { label: 'Date of Birth',       value: sn.patientDob },
+          { label: 'ID Number',           value: sn.patientIdNumber },
+          { label: 'Date of Examination', value: sn.examDate },
+          { label: 'Practitioner',        value: sn.practitioner },
+          { label: 'Practice No.',        value: practice.practiceNumber },
+        ]} />
+        <View>
+          <Text style={pdfStyles.sectionTitle}>Certificate</Text>
+          <Text style={pdfStyles.para}>
+            {'This is to certify that the above-named patient was examined on ' + sn.examDate +
+             ' and was found to be medically unfit for work / school / duty for a period of ' +
+             sn.days + ' day' + (String(sn.days) !== '1' ? 's' : '') + periodStr + '.'}
+          </Text>
+          {sn.showDiagnosis && sn.diagnosis
+            ? <PdfSection title="Diagnosis" body={sn.diagnosis} />
+            : <Text style={[pdfStyles.para, { color: '#64748B' }]}>
+                Diagnosis withheld at patient's request (medical confidentiality applies).
+              </Text>
+          }
+          {sn.icd10 ? <Text style={pdfStyles.rxLine}>ICD-10: {sn.icd10}</Text> : null}
+        </View>
+        {sn.notes ? <PdfSection title="Additional Notes" body={sn.notes} /> : null}
+        <PdfSignature practitioner={sn.practitioner} />
+        <Text style={pdfStyles.footer} fixed>
+          {practice.name}  ·  Confidential medical document (POPIA).  ·  Generated via Tlhiso.
+        </Text>
+      </Page>
+    </Document>
+  )
+}
+
 // Build a Blob from a PDF document element
 async function pdfToBlob(element) {
   return await pdf(element).toBlob()
@@ -3741,6 +3827,435 @@ function Referrals() {
 }
 
 
+// ── Prescriptions ─────────────────────────────────────────────────────────────
+const RX_BLANK = {
+  patientId: '', practitioner: '', date: new Date().toISOString().slice(0, 10), notes: '',
+}
+const RX_ITEM_BLANK = {
+  drug: '', dosage: '', frequency: '', duration: '', quantity: '', repeats: '', instructions: '',
+}
+
+function Prescriptions() {
+  const { user, profile } = useAuth()
+  const uid = user?.uid
+  const scripts      = useCollection(uid ? `users/${uid}/prescriptions` : null)
+  const patients     = useCollection(uid ? `users/${uid}/patients` : null)
+  const practitioners = useCollection(uid ? `users/${uid}/practitioners` : null)
+  const [open,    setOpen]    = useState(false)
+  const [form,    setForm]    = useState(RX_BLANK)
+  const [items,   setItems]   = useState([{ ...RX_ITEM_BLANK }])
+  const [saving,  setSaving]  = useState(false)
+  const [busy,    setBusy]    = useState('')
+  const [viewing, setViewing] = useState(null)
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const practice = {
+    name:           profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl:        profile?.businessLogoUrl || '',
+    line:           [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
+    address:        profile?.address || '',
+    practiceNumber: profile?.practiceNumber || '',
+  }
+
+  const selPatient = patients.find(p => p.id === form.patientId)
+
+  function openNew() { setForm(RX_BLANK); setItems([{ ...RX_ITEM_BLANK }]); setOpen(true) }
+  function updateItem(idx, field, val) {
+    setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: val } : it))
+  }
+  function addItem() { setItems(prev => [...prev, { ...RX_ITEM_BLANK }]) }
+  function removeItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
+
+  async function save() {
+    if (!uid) return
+    if (!form.patientId) { alert('Select a patient.'); return }
+    if (!items.some(i => i.drug.trim())) { alert('Add at least one medicine.'); return }
+    setSaving(true)
+    try {
+      await addDoc(collection(db, 'users', uid, 'prescriptions'), {
+        ...form,
+        patient:         selPatient ? `${selPatient.firstName} ${selPatient.lastName}` : '',
+        patientDob:      selPatient?.dob || '',
+        patientIdNumber: selPatient?.idNumber || '',
+        medicalAid:      selPatient?.medicalAid || '',
+        planName:        selPatient?.planName || '',
+        memberNumber:    selPatient?.memberNumber || '',
+        items:           items.filter(i => i.drug.trim()),
+        createdAt:       serverTimestamp(),
+      })
+      setOpen(false)
+    } finally { setSaving(false) }
+  }
+
+  async function downloadPdf(rx) {
+    setBusy(rx.id)
+    try {
+      const blob = await pdfToBlob(<PrescriptionPDF rx={rx} practice={practice} />)
+      downloadBlob(blob, `Prescription-${(rx.patient || 'patient').replace(/\s+/g, '_')}-${rx.date || ''}.pdf`)
+    } catch { alert('Could not generate PDF.') }
+    finally { setBusy('') }
+  }
+
+  async function deletePrescription(id) {
+    if (!uid || !confirm('Delete this prescription?')) return
+    await deleteDoc(doc(db, 'users', uid, 'prescriptions', id))
+    if (viewing?.id === id) setViewing(null)
+  }
+
+  const cols = [
+    { key: 'patient', label: 'Patient', render: r => <span className="font-semibold text-slate-800">{r.patient}</span> },
+    { key: 'date', label: 'Date' },
+    { key: 'items', label: 'Medicines', render: r => <span>{r.items?.length ?? 0} item{r.items?.length !== 1 ? 's' : ''}</span> },
+    { key: 'practitioner', label: 'Practitioner' },
+    {
+      key: 'actions', label: '',
+      render: r => (
+        <div className="flex gap-2">
+          <button onClick={() => setViewing(r)} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-primary hover:text-primary transition"><Eye size={14} /></button>
+          <button onClick={() => downloadPdf(r)} disabled={busy === r.id} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-primary hover:text-primary transition disabled:opacity-50">
+            {busy === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          </button>
+          <button onClick={() => deletePrescription(r.id)} className="rounded-lg border border-slate-200 p-1.5 text-red-400 hover:border-red-400 transition"><Trash2 size={14} /></button>
+        </div>
+      ),
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Prescriptions</h2>
+          <p className="mt-1 text-sm text-slate-500">Create and manage patient prescriptions</p>
+        </div>
+        <button onClick={openNew} className="flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90">
+          <Plus size={15} /> New Prescription
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <DataTable columns={cols} data={scripts} emptyMessage="No prescriptions yet. Create your first one." />
+      </div>
+
+      {/* New Prescription modal */}
+      <Modal open={open} onClose={() => !saving && setOpen(false)} title="New Prescription" size="xl">
+        <div className="space-y-5">
+          <div className="rounded-2xl bg-slate-50 p-4 text-sm">
+            <p className="font-semibold text-slate-800">{practice.name}</p>
+            {practice.address && <p className="text-xs mt-0.5 text-slate-600">{practice.address}</p>}
+            {practice.line && <p className="text-xs mt-0.5 text-slate-400">{practice.line}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
+              <option value="">— Select patient —</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </Field>
+            <Field label="Practitioner *" select value={form.practitioner} onChange={set('practitioner')}>
+              <option value="">— Select practitioner —</option>
+              {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`}>{p.title || ''} {p.name}</option>)}
+            </Field>
+            <Field label="Date" type="date" value={form.date} onChange={set('date')} />
+          </div>
+
+          {selPatient && (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 grid grid-cols-3 gap-3 text-xs text-slate-600">
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">ID Number</span>{selPatient.idNumber || '—'}</div>
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">DOB</span>{selPatient.dob || '—'}</div>
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Medical Aid</span>{selPatient.medicalAid || '—'}</div>
+            </div>
+          )}
+
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-primary">Medicines Prescribed</span>
+              <button type="button" onClick={addItem} className="flex items-center gap-1 rounded-xl bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20">
+                <Plus size={12} /> Add Medicine
+              </button>
+            </div>
+            <div className="space-y-4">
+              {items.map((item, idx) => (
+                <div key={idx} className="relative rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <Field label={`Medicine ${idx + 1}`} value={item.drug} onChange={e => updateItem(idx, 'drug', e.target.value)} placeholder="e.g. Amoxicillin 500mg capsules" />
+                    </div>
+                    <Field label="Dosage" value={item.dosage} onChange={e => updateItem(idx, 'dosage', e.target.value)} placeholder="e.g. 1 capsule" />
+                    <Field label="Frequency" value={item.frequency} onChange={e => updateItem(idx, 'frequency', e.target.value)} placeholder="e.g. 3× daily" />
+                    <Field label="Duration" value={item.duration} onChange={e => updateItem(idx, 'duration', e.target.value)} placeholder="e.g. 7 days" />
+                    <Field label="Quantity" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} placeholder="e.g. 21" />
+                    <Field label="Repeats" value={item.repeats} onChange={e => updateItem(idx, 'repeats', e.target.value)} placeholder="e.g. 2" />
+                    <Field label="Special instructions" value={item.instructions} onChange={e => updateItem(idx, 'instructions', e.target.value)} placeholder="e.g. Take with food" />
+                  </div>
+                  {items.length > 1 && (
+                    <button type="button" onClick={() => removeItem(idx)} className="absolute right-3 top-3 rounded-lg p-1 text-red-400 hover:bg-red-50">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Field label="Notes / Special Instructions" textarea value={form.notes} onChange={set('notes')} />
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={save} disabled={saving} className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Prescription</>}
+            </button>
+            <button onClick={() => setOpen(false)} disabled={saving} className="flex-1 rounded-2xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* View prescription */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Prescription" size="lg">
+        {viewing && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><span className="text-xs text-slate-400 block">Patient</span><span className="font-semibold">{viewing.patient}</span></div>
+              <div><span className="text-xs text-slate-400 block">Date</span><span className="font-semibold">{viewing.date}</span></div>
+              <div><span className="text-xs text-slate-400 block">ID Number</span><span>{viewing.patientIdNumber || '—'}</span></div>
+              <div><span className="text-xs text-slate-400 block">Medical Aid</span><span>{viewing.medicalAid || '—'}</span></div>
+              <div><span className="text-xs text-slate-400 block">Practitioner</span><span>{viewing.practitioner}</span></div>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-primary mb-2">Medicines</p>
+              <div className="space-y-2">
+                {viewing.items?.map((item, i) => (
+                  <div key={i} className="rounded-xl bg-slate-50 p-3 text-sm">
+                    <p className="font-semibold text-slate-800">{i + 1}. {item.drug}</p>
+                    <p className="text-slate-500 text-xs mt-1">
+                      {[item.dosage, item.frequency, item.duration].filter(Boolean).join(' · ')}
+                      {item.quantity ? ` · Qty: ${item.quantity}` : ''}
+                      {item.repeats  ? ` · Repeats: ${item.repeats}` : ''}
+                    </p>
+                    {item.instructions && <p className="text-slate-400 text-xs mt-0.5">{item.instructions}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {viewing.notes && <div><p className="text-xs text-slate-400 mb-1">Notes</p><p className="text-sm">{viewing.notes}</p></div>}
+            <button onClick={() => downloadPdf(viewing)} disabled={busy === viewing.id} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              {busy === viewing.id ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Download size={14} /> Download Prescription PDF</>}
+            </button>
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
+// ── Sick Notes ─────────────────────────────────────────────────────────────────
+const SN_BLANK = {
+  patientId: '', practitioner: '', examDate: new Date().toISOString().slice(0, 10),
+  fromDate: '', toDate: '', days: '', showDiagnosis: false, diagnosis: '', icd10: '', notes: '',
+}
+
+function SickNotes() {
+  const { user, profile } = useAuth()
+  const uid = user?.uid
+  const snList       = useCollection(uid ? `users/${uid}/sicknotes` : null)
+  const patients     = useCollection(uid ? `users/${uid}/patients` : null)
+  const practitioners = useCollection(uid ? `users/${uid}/practitioners` : null)
+  const [open,    setOpen]    = useState(false)
+  const [form,    setForm]    = useState(SN_BLANK)
+  const [saving,  setSaving]  = useState(false)
+  const [busy,    setBusy]    = useState('')
+  const [viewing, setViewing] = useState(null)
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const practice = {
+    name:           profile?.businessName || profile?.name || 'Tlhiso',
+    logoUrl:        profile?.businessLogoUrl || '',
+    line:           [profile?.practiceNumber && `Practice No. ${profile.practiceNumber}`, profile?.phone, profile?.email].filter(Boolean).join('  ·  '),
+    address:        profile?.address || '',
+    practiceNumber: profile?.practiceNumber || '',
+  }
+
+  const selPatient = patients.find(p => p.id === form.patientId)
+
+  function recalcDays(from, to) {
+    if (!from || !to) return ''
+    const d = Math.round((new Date(to) - new Date(from)) / 86400000) + 1
+    return d > 0 ? String(d) : ''
+  }
+
+  function handleFrom(e) {
+    const from = e.target.value
+    setForm(f => ({ ...f, fromDate: from, days: recalcDays(from, f.toDate) }))
+  }
+  function handleTo(e) {
+    const to = e.target.value
+    setForm(f => ({ ...f, toDate: to, days: recalcDays(f.fromDate, to) }))
+  }
+  function toggleDiagnosis() { setForm(f => ({ ...f, showDiagnosis: !f.showDiagnosis })) }
+
+  async function save() {
+    if (!uid || !form.patientId) { alert('Select a patient.'); return }
+    if (!form.examDate) { alert('Enter date of examination.'); return }
+    if (!form.days) { alert('Enter date range or number of days.'); return }
+    setSaving(true)
+    try {
+      await addDoc(collection(db, 'users', uid, 'sicknotes'), {
+        ...form,
+        patient:         selPatient ? `${selPatient.firstName} ${selPatient.lastName}` : '',
+        patientDob:      selPatient?.dob || '',
+        patientIdNumber: selPatient?.idNumber || '',
+        createdAt:       serverTimestamp(),
+      })
+      setOpen(false)
+      setForm(SN_BLANK)
+    } finally { setSaving(false) }
+  }
+
+  async function downloadPdf(sn) {
+    setBusy(sn.id)
+    try {
+      const blob = await pdfToBlob(<SickNotePDF sn={sn} practice={practice} />)
+      downloadBlob(blob, `SickNote-${(sn.patient || 'patient').replace(/\s+/g, '_')}-${sn.examDate || ''}.pdf`)
+    } catch { alert('Could not generate PDF.') }
+    finally { setBusy('') }
+  }
+
+  async function deleteSickNote(id) {
+    if (!uid || !confirm('Delete this sick note?')) return
+    await deleteDoc(doc(db, 'users', uid, 'sicknotes', id))
+    if (viewing?.id === id) setViewing(null)
+  }
+
+  const cols = [
+    { key: 'patient', label: 'Patient', render: r => <span className="font-semibold text-slate-800">{r.patient}</span> },
+    { key: 'examDate', label: 'Examination Date' },
+    { key: 'days', label: 'Days Off', render: r => <span>{r.days} day{String(r.days) !== '1' ? 's' : ''}</span> },
+    { key: 'practitioner', label: 'Practitioner' },
+    {
+      key: 'actions', label: '',
+      render: r => (
+        <div className="flex gap-2">
+          <button onClick={() => setViewing(r)} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-primary hover:text-primary transition"><Eye size={14} /></button>
+          <button onClick={() => downloadPdf(r)} disabled={busy === r.id} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-primary hover:text-primary transition disabled:opacity-50">
+            {busy === r.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          </button>
+          <button onClick={() => deleteSickNote(r.id)} className="rounded-lg border border-slate-200 p-1.5 text-red-400 hover:border-red-400 transition"><Trash2 size={14} /></button>
+        </div>
+      ),
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Sick Notes</h2>
+          <p className="mt-1 text-sm text-slate-500">Issue medical certificates and sick notes</p>
+        </div>
+        <button onClick={() => { setForm(SN_BLANK); setOpen(true) }} className="flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90">
+          <Plus size={15} /> New Sick Note
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <DataTable columns={cols} data={snList} emptyMessage="No sick notes yet." />
+      </div>
+
+      {/* New Sick Note modal */}
+      <Modal open={open} onClose={() => !saving && setOpen(false)} title="New Sick Note / Medical Certificate" size="lg">
+        <div className="space-y-5">
+          <div className="rounded-2xl bg-slate-50 p-4 text-sm">
+            <p className="font-semibold text-slate-800">{practice.name}</p>
+            {practice.address && <p className="text-xs mt-0.5 text-slate-600">{practice.address}</p>}
+            {practice.line && <p className="text-xs mt-0.5 text-slate-400">{practice.line}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Patient *" select value={form.patientId} onChange={set('patientId')}>
+              <option value="">— Select patient —</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </Field>
+            <Field label="Practitioner *" select value={form.practitioner} onChange={set('practitioner')}>
+              <option value="">— Select practitioner —</option>
+              {practitioners.map(p => <option key={p.id} value={`${p.title || ''} ${p.name}`}>{p.title || ''} {p.name}</option>)}
+            </Field>
+          </div>
+
+          {selPatient && (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 grid grid-cols-3 gap-3 text-xs text-slate-600">
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">ID Number</span>{selPatient.idNumber || '—'}</div>
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">DOB</span>{selPatient.dob || '—'}</div>
+              <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Gender</span>{selPatient.gender || '—'}</div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date of Examination *" type="date" value={form.examDate} onChange={set('examDate')} />
+            <Field label="Days Off *" type="number" min="1" value={form.days} onChange={set('days')} placeholder="e.g. 3" />
+            <Field label="From Date" type="date" value={form.fromDate} onChange={handleFrom} />
+            <Field label="To Date" type="date" value={form.toDate} onChange={handleTo} />
+          </div>
+
+          {/* Diagnosis toggle */}
+          <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+            <label className="flex cursor-pointer items-center gap-3">
+              <button type="button" onClick={toggleDiagnosis}
+                className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${form.showDiagnosis ? 'bg-primary' : 'bg-slate-200'}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${form.showDiagnosis ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+              <span className="text-sm font-semibold text-slate-700">Include diagnosis on certificate</span>
+            </label>
+            {form.showDiagnosis ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><Field label="Diagnosis" textarea value={form.diagnosis} onChange={set('diagnosis')} /></div>
+                <Field label="ICD-10 Code(s)" value={form.icd10} onChange={set('icd10')} placeholder="e.g. J06.9" />
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">Diagnosis will be marked as withheld (medical confidentiality) on the certificate.</p>
+            )}
+          </div>
+
+          <Field label="Additional Notes" textarea value={form.notes} onChange={set('notes')} />
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={save} disabled={saving} className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><SaveIcon size={14} /> Save Sick Note</>}
+            </button>
+            <button onClick={() => setOpen(false)} disabled={saving} className="flex-1 rounded-2xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* View sick note */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Sick Note Details" size="md">
+        {viewing && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><span className="text-xs text-slate-400 block">Patient</span><span className="font-semibold">{viewing.patient}</span></div>
+              <div><span className="text-xs text-slate-400 block">Exam Date</span><span className="font-semibold">{viewing.examDate}</span></div>
+              <div><span className="text-xs text-slate-400 block">ID Number</span><span>{viewing.patientIdNumber || '—'}</span></div>
+              <div><span className="text-xs text-slate-400 block">Days Off</span><span>{viewing.days}</span></div>
+              {viewing.fromDate && (
+                <div><span className="text-xs text-slate-400 block">Period</span><span>{viewing.fromDate} to {viewing.toDate}</span></div>
+              )}
+              <div><span className="text-xs text-slate-400 block">Practitioner</span><span>{viewing.practitioner}</span></div>
+              {viewing.showDiagnosis && viewing.diagnosis && (
+                <div className="col-span-2"><span className="text-xs text-slate-400 block">Diagnosis</span><span>{viewing.diagnosis}</span></div>
+              )}
+            </div>
+            {viewing.notes && <div><p className="text-xs text-slate-400 mb-1">Notes</p><p className="text-sm">{viewing.notes}</p></div>}
+            <button onClick={() => downloadPdf(viewing)} disabled={busy === viewing.id} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              {busy === viewing.id ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Download size={14} /> Download Sick Note PDF</>}
+            </button>
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
   return <SettingsPage industry="medical" />
@@ -3756,6 +4271,8 @@ export default function MedicalDashboard() {
         <Route path="appointments" element={<Appointments />} />
         <Route path="practitioners" element={<Practitioners />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="prescriptions" element={<Prescriptions />} />
+        <Route path="sicknotes" element={<SickNotes />} />
         <Route path="referrals" element={<Referrals />} />
         <Route path="surveys" element={<SurveysModule industry="medical" />} />
         <Route path="campaigns"    element={<CampaignsModule industry="medical" />} />
