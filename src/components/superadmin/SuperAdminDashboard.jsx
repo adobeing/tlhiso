@@ -25,7 +25,7 @@ import {
   ArrowLeft, TrendingUp, MessageSquare, BarChart2, Megaphone,
   Calendar, FileText, UserCheck, UserX, Activity,
   DollarSign, Smartphone, AtSign, RefreshCw, ChevronRight,
-  Shield, Clock, Star, Bell, Bot,
+  Shield, Clock, Star, Bell, Bot, Copy, ExternalLink,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
@@ -1977,6 +1977,64 @@ function AdminAIAgent() {
   )
 }
 
+// ── Resources ─────────────────────────────────────────────────────────────────
+const RESOURCES = [
+  {
+    title: 'Property Brochure',
+    description: 'Shareable A4 brochure for the property management vertical. Hidden from search engines — share the link directly with prospects.',
+    url: 'https://tlhiso.com/brochure/property-brochure/',
+  },
+]
+
+function AdminResources() {
+  const [copiedUrl, setCopiedUrl] = useState(null)
+
+  function copyLink(url) {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedUrl(url)
+      setTimeout(() => setCopiedUrl(null), 2500)
+    })
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Resources</h2>
+        <p className="mt-1 text-sm text-slate-400">Marketing material and shareable links</p>
+      </div>
+
+      <div className="grid gap-5 max-w-3xl">
+        {RESOURCES.map(r => (
+          <div key={r.url} className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm">
+            <div className="flex items-start gap-4">
+              <span className="flex h-12 w-12 flex-none items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                <FileText size={22} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-bold text-slate-800">{r.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{r.description}</p>
+                <p className="mt-3 truncate rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-600">{r.url}</p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <a href={r.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#4e7d6d]">
+                    <ExternalLink size={14} /> Open
+                  </a>
+                  <button onClick={() => copyLink(r.url)}
+                    className="flex items-center gap-2 rounded-2xl border border-slate-200 px-5 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">
+                    {copiedUrl === r.url
+                      ? <><CheckCircle size={14} className="text-green-600" /> Copied!</>
+                      : <><Copy size={14} /> Copy Link</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 export default function SuperAdminDashboard() {
   return (
@@ -1987,6 +2045,7 @@ export default function SuperAdminDashboard() {
         <Route path="messages"         element={<AdminMessages />}       />
         <Route path="notifications"    element={<AdminNotifications />}  />
         <Route path="support"          element={<AdminSupport />}        />
+        <Route path="resources"        element={<AdminResources />}      />
         <Route path="settings"         element={<AdminSettings />}       />
         <Route path="campaigns"        element={<AdminCampaigns />}      />
         <Route path="insights"         element={<Insights />}            />

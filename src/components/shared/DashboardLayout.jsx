@@ -92,6 +92,7 @@ const NAV_MAP = {
     { label: 'AI Agent',       icon: Bot,             to: '/superadmin/agent' },
     { label: 'Notifications',  icon: Bell,            to: '/superadmin/notifications' },
     { label: 'Support',        icon: MessageSquare,   to: '/superadmin/support' },
+    { label: 'Resources',      icon: FolderKanban,    to: '/superadmin/resources' },
     { label: 'Settings',       icon: Settings,        to: '/superadmin/settings' },
   ],
   events: [
